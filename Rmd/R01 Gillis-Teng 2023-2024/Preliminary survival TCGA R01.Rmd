@@ -1,0 +1,761 @@
+---
+title: "Preliminary Survival TCGA and MM avatar R01"
+author: "Christelle Colin-Leitzinger"
+date: '`r Sys.Date()`'
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    toc_collapsed: false
+    theme: united
+    highlight: pygments
+    df_print: paged
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,
+                      warning = FALSE,
+                      message = FALSE,
+                      cache = FALSE,
+                      fig.align='center'
+                      )
+```
+
+```{r library}
+library(tidyverse)
+library(survival)
+library(survminer)
+library(ggsurvfit)
+theme_set(theme_classic())
+```
+
+```{r load}
+germline_data_MM <- read_rds(paste0(here::here(), "/germline_patient_data.rds"))
+germline_data <- read_rds(paste0(here::here(), "/germline_data.rds"))
+
+ps = read.table(paste0(here::here(), '/TCGA_data_clinical_patient-81samples-withCHstatus.txt'),
+                header=T,stringsAsFactors=F,quote='',comment='',sep='\t')
+load(#'/share/lab_teng/yihantang/TCGA/non-coding/non-coding_VCF/
+     paste0(here::here(), '/non.coding.vcf.dissect.filter.rda'))
+nc.ch.pat = substr(colnames(GT.10)[colSums(idx)>0],1,12)
+
+```
+
+# TCGA based only on coding CHIP
+```{r cleaning}
+luad <- ps %>% 
+    mutate(
+        CH_status = recode(CH_status, '0' = 'non-CHIP', '1' = 'CHIP'),
+        OS_STATUS = recode(OS_STATUS, '0:LIVING' = 0, '1:DECEASED' = 1),
+        DSS_STATUS = recode(DSS_STATUS, '0:ALIVE OR DEAD TUMOR FREE' = 0, '1:DEAD WITH TUMOR' = 1),
+        DFS_STATUS = recode(DFS_STATUS, '0:DiseaseFree'=0,'1:Recurred/Progressed'=1),
+        PFS_STATUS = recode(PFS_STATUS, '0:CENSORED'=0,'1:PROGRESSION'=1))
+
+luad.os = luad[!is.na(luad$OS_STATUS) & !is.na(luad$OS_MONTHS)&!is.na(luad$CH_status),]
+luad.dss = luad[!is.na(luad$DSS_STATUS) & !is.na(luad$DSS_MONTHS)&!is.na(luad$CH_status),]
+luad.dfs = luad[!is.na(luad$DFS_STATUS) & !is.na(luad$DFS_MONTHS)&!is.na(luad$CH_status),]
+luad.pfs = luad[!is.na(luad$PFS_STATUS) & !is.na(luad$PFS_MONTHS)&!is.na(luad$CH_status),]
+```
+
+```{r survival coding CHIP, fig.height = 7}
+# OS = survfit2(Surv(OS_MONTHS, OS_STATUS) ~ CH_status, data = luad.os) %>%
+#     ggsurvfit() +
+#     labs(
+#         x = "Months",
+#         y = "Overall survival probability"
+#         ) +
+#     add_confidence_interval() + annotate("text",x=100,y=1,label=paste0("p=",round(summary(t1)$coef[5],2)))
+myplot <- survfit2(Surv(OS_MONTHS, OS_STATUS) ~ CH_status, data = luad.os)
+OS <- ggsurvplot(myplot, data = luad.os,
+           title = "Overall survival",
+           font.main = c(20, "bold", "black"),
+           font.x = c(16, "bold", "black"),
+           font.y = c(16, "bold", "black"),
+           font.legend = c(16, "bold", "black"),
+           font.tickslab = c(14, "bold", "black"),
+           size = 1.5,
+
+           xlab = "Time (months)",
+           legend = "top",
+           legend.title = "",
+           # legend.labs = c("White Non-Hispanic", "Hispanic", "Black"),
+           palette = c("red", "blue"),
+           pval = TRUE,
+           pval.coord = c(0, 0.08),
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE,
+           # Add risk table
+           tables.height = 0.3,
+           risk.table.title = "Risk table",
+           risk.table = TRUE,
+           risk.table.y.text = FALSE,
+           risk.table.fontsize = 4,
+           tables.theme = theme_survminer(base_size = 5,
+                                          font.main = c(14, "bold", "black"),
+                                          font.x = c(14, "bold", "black"),
+                                          font.y = c(14, "bold", "transparent"),
+                                          font.tickslab = c(14, "bold", "black"))
+)+ guides(colour = guide_legend(nrow = 3))
+OS
+# curv_facet <- OS$plot
+# g2 <- ggplotGrob(curv_facet)
+# min_ncol <- min(ncol(g2), ncol(g2))
+# g <- gridExtra::gtable_rbind(g2[, 1:min_ncol], g2[, 1:min_ncol], size="last")
+# g$widths <- grid::unit.pmax(g2$widths, g2$widths)
+# grid::grid.newpage()
+# grid::grid.draw(g)
+# DSS = survfit2(Surv(DSS_MONTHS, DSS_STATUS) ~ CH_status, data = luad.dss) %>%
+#     ggsurvfit() +
+#     labs(
+#         x = "Months",
+#         y = "Disease-specific survival probability"
+#         ) +
+#     add_confidence_interval()+ annotate("text",x=100,y=1,label=paste0("p=",round(summary(t2)$coef[5],2)))
+myplot <- survfit2(Surv(DSS_MONTHS, DSS_STATUS) ~ CH_status, data = luad.dss)
+DSS <- ggsurvplot(myplot, data = luad.dss,
+           title = "Disease-specific survival",
+           font.main = c(20, "bold", "black"),
+           font.x = c(16, "bold", "black"),
+           font.y = c(16, "bold", "black"),
+           font.legend = c(16, "bold", "black"),
+           font.tickslab = c(14, "bold", "black"),
+           size = 1.5,
+
+           xlab = "Time (months)",
+           legend = "top",
+           legend.title = "",
+           # legend.labs = c("White Non-Hispanic", "Hispanic", "Black"),
+           palette = c("red", "blue"),
+           pval = TRUE,
+           pval.coord = c(0, 0.08),
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE,
+           # Add risk table
+           tables.height = 0.3,
+           risk.table.title = "Risk table",
+           risk.table = TRUE,
+           risk.table.y.text = FALSE,
+           risk.table.fontsize = 4,
+           tables.theme = theme_survminer(base_size = 5,
+                                          font.main = c(14, "bold", "black"),
+                                          font.x = c(14, "bold", "black"),
+                                          font.y = c(14, "bold", "transparent"),
+                                          font.tickslab = c(14, "bold", "black"))
+)+ guides(colour = guide_legend(nrow = 3))
+DSS
+# DFS = survfit2(Surv(DFS_MONTHS, DFS_STATUS) ~ CH_status, data = luad.dfs) %>%
+#     ggsurvfit() +
+#     labs(
+#         x = "Months",
+#         y = "Disease-free survival probability"
+#         ) +
+#     add_confidence_interval()+ annotate("text",x=100,y=1,label=paste0("p=",round(summary(t3)$coef[5],2)))
+myplot <- survfit2(Surv(DFS_MONTHS, DFS_STATUS) ~ CH_status, data = luad.dfs)
+DFS <- ggsurvplot(myplot, data = luad.dfs,
+           title = "Disease-free survival",
+           font.main = c(20, "bold", "black"),
+           font.x = c(16, "bold", "black"),
+           font.y = c(16, "bold", "black"),
+           font.legend = c(16, "bold", "black"),
+           font.tickslab = c(14, "bold", "black"),
+           size = 1.5,
+
+           xlab = "Time (months)",
+           legend = "top",
+           legend.title = "",
+           # legend.labs = c("White Non-Hispanic", "Hispanic", "Black"),
+           palette = c("red", "blue"),
+           pval = TRUE,
+           pval.coord = c(0, 0.08),
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE,
+           # Add risk table
+           tables.height = 0.3,
+           risk.table.title = "Risk table",
+           risk.table = TRUE,
+           risk.table.y.text = FALSE,
+           risk.table.fontsize = 4,
+           tables.theme = theme_survminer(base_size = 5,
+                                          font.main = c(14, "bold", "black"),
+                                          font.x = c(14, "bold", "black"),
+                                          font.y = c(14, "bold", "transparent"),
+                                          font.tickslab = c(14, "bold", "black"))
+)+ guides(colour = guide_legend(nrow = 3))
+DFS
+# PFS = survfit2(Surv(PFS_MONTHS, PFS_STATUS) ~ CH_status, data = luad.pfs) %>%
+#     ggsurvfit() +
+#     labs(
+#         x = "Months",
+#         y = "Progression-free survival probability"
+#         ) + 
+#     add_confidence_interval()+ annotate("text",x=100,y=1,label=paste0("p=",round(summary(t4)$coef[5],2)))
+myplot <- survfit2(Surv(PFS_MONTHS, PFS_STATUS) ~ CH_status, data = luad.pfs)
+PFS <- ggsurvplot(myplot, data = luad.pfs,
+           title = "Progression-free survival",
+           font.main = c(20, "bold", "black"),
+           font.x = c(16, "bold", "black"),
+           font.y = c(16, "bold", "black"),
+           font.legend = c(16, "bold", "black"),
+           font.tickslab = c(14, "bold", "black"),
+           size = 1.5,
+
+           xlab = "Time (months)",
+           legend = "top",
+           legend.title = "",
+           # legend.labs = c("White Non-Hispanic", "Hispanic", "Black"),
+           palette = c("red", "blue"),
+           pval = TRUE,
+           pval.coord = c(0, 0.08),
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE,
+           # Add risk table
+           tables.height = 0.3,
+           risk.table.title = "Risk table",
+           risk.table = TRUE,
+           risk.table.y.text = FALSE,
+           risk.table.fontsize = 4,
+           tables.theme = theme_survminer(base_size = 5,
+                                          font.main = c(14, "bold", "black"),
+                                          font.x = c(14, "bold", "black"),
+                                          font.y = c(14, "bold", "transparent"),
+                                          font.tickslab = c(14, "bold", "black"))
+)+ guides(colour = guide_legend(nrow = 3))
+PFS
+```
+
+# TCGA based on coding AND non-coding CHIP
+```{r clean non-coding CHIP}
+luad[luad$PATIENT_ID %in% nc.ch.pat,'CH_status'] = 'CHIP' ## add nc chip
+
+luad.os = luad[!is.na(luad$OS_STATUS) & !is.na(luad$OS_MONTHS)&!is.na(luad$CH_status),]
+luad.dss = luad[!is.na(luad$DSS_STATUS) & !is.na(luad$DSS_MONTHS)&!is.na(luad$CH_status),]
+luad.dfs = luad[!is.na(luad$DFS_STATUS) & !is.na(luad$DFS_MONTHS)&!is.na(luad$CH_status),]
+luad.pfs = luad[!is.na(luad$PFS_STATUS) & !is.na(luad$PFS_MONTHS)&!is.na(luad$CH_status),]
+
+# t1 = coxph(Surv(OS_MONTHS, OS_STATUS) ~ CH_status, data = luad.os)
+# t2 = coxph(Surv(DSS_MONTHS, DSS_STATUS) ~ CH_status, data = luad.dss)
+# t3 = coxph(Surv(DFS_MONTHS, DFS_STATUS) ~ CH_status, data = luad.dfs)
+# t4 = coxph(Surv(PFS_MONTHS, PFS_STATUS) ~ CH_status, data = luad.pfs)
+```
+
+```{r survival, fig.height = 7}
+# OS = survfit2(Surv(OS_MONTHS, OS_STATUS) ~ CH_status, data = luad.os) %>%
+#     ggsurvfit() +
+#     labs(
+#         x = "Months",
+#         y = "Overall survival probability"
+#         ) +
+#     add_confidence_interval() + annotate("text",x=100,y=1,label=paste0("p=",round(summary(t1)$coef[5],2)))
+myplot <- survfit2(Surv(OS_MONTHS, OS_STATUS) ~ CH_status, data = luad.os)
+OS <- ggsurvplot(myplot, data = luad.os,
+           title = "Overall survival",
+           font.main = c(20, "bold", "black"),
+           font.x = c(16, "bold", "black"),
+           font.y = c(16, "bold", "black"),
+           font.legend = c(16, "bold", "black"),
+           font.tickslab = c(14, "bold", "black"),
+           size = 1.5,
+
+           xlab = "Time (months)",
+           legend = "top",
+           legend.title = "",
+           # legend.labs = c("White Non-Hispanic", "Hispanic", "Black"),
+           palette = c("darkred", "blue"),
+           pval = TRUE,
+           pval.coord = c(0, 0.08),
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE,
+           # Add risk table
+           tables.height = 0.3,
+           risk.table.title = "Risk table",
+           risk.table = TRUE,
+           risk.table.y.text = FALSE,
+           risk.table.fontsize = 4,
+           tables.theme = theme_survminer(base_size = 5,
+                                          font.main = c(14, "bold", "black"),
+                                          font.x = c(14, "bold", "black"),
+                                          font.y = c(14, "bold", "transparent"),
+                                          font.tickslab = c(14, "bold", "black"))
+)+ guides(colour = guide_legend(nrow = 3))
+OS
+# curv_facet <- OS$plot
+# g2 <- ggplotGrob(curv_facet)
+# min_ncol <- min(ncol(g2), ncol(g2))
+# g <- gridExtra::gtable_rbind(g2[, 1:min_ncol], g2[, 1:min_ncol], size="last")
+# g$widths <- grid::unit.pmax(g2$widths, g2$widths)
+# grid::grid.newpage()
+# grid::grid.draw(g)
+# DSS = survfit2(Surv(DSS_MONTHS, DSS_STATUS) ~ CH_status, data = luad.dss) %>%
+#     ggsurvfit() +
+#     labs(
+#         x = "Months",
+#         y = "Disease-specific survival probability"
+#         ) +
+#     add_confidence_interval()+ annotate("text",x=100,y=1,label=paste0("p=",round(summary(t2)$coef[5],2)))
+myplot <- survfit2(Surv(DSS_MONTHS, DSS_STATUS) ~ CH_status, data = luad.dss)
+DSS <- ggsurvplot(myplot, data = luad.dss,
+           title = "Disease-specific survival",
+           font.main = c(20, "bold", "black"),
+           font.x = c(16, "bold", "black"),
+           font.y = c(16, "bold", "black"),
+           font.legend = c(16, "bold", "black"),
+           font.tickslab = c(14, "bold", "black"),
+           size = 1.5,
+
+           xlab = "Time (months)",
+           legend = "top",
+           legend.title = "",
+           # legend.labs = c("White Non-Hispanic", "Hispanic", "Black"),
+           palette = c("darkred", "blue"),
+           pval = TRUE,
+           pval.coord = c(0, 0.08),
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE,
+           # Add risk table
+           tables.height = 0.3,
+           risk.table.title = "Risk table",
+           risk.table = TRUE,
+           risk.table.y.text = FALSE,
+           risk.table.fontsize = 4,
+           tables.theme = theme_survminer(base_size = 5,
+                                          font.main = c(14, "bold", "black"),
+                                          font.x = c(14, "bold", "black"),
+                                          font.y = c(14, "bold", "transparent"),
+                                          font.tickslab = c(14, "bold", "black"))
+)+ guides(colour = guide_legend(nrow = 3))
+DSS
+# DFS = survfit2(Surv(DFS_MONTHS, DFS_STATUS) ~ CH_status, data = luad.dfs) %>%
+#     ggsurvfit() +
+#     labs(
+#         x = "Months",
+#         y = "Disease-free survival probability"
+#         ) +
+#     add_confidence_interval()+ annotate("text",x=100,y=1,label=paste0("p=",round(summary(t3)$coef[5],2)))
+myplot <- survfit2(Surv(DFS_MONTHS, DFS_STATUS) ~ CH_status, data = luad.dfs)
+DFS <- ggsurvplot(myplot, data = luad.dfs,
+           title = "Disease-free survival",
+           font.main = c(20, "bold", "black"),
+           font.x = c(16, "bold", "black"),
+           font.y = c(16, "bold", "black"),
+           font.legend = c(16, "bold", "black"),
+           font.tickslab = c(14, "bold", "black"),
+           size = 1.5,
+
+           xlab = "Time (months)",
+           legend = "top",
+           legend.title = "",
+           # legend.labs = c("White Non-Hispanic", "Hispanic", "Black"),
+           palette = c("darkred", "blue"),
+           pval = TRUE,
+           pval.coord = c(0, 0.08),
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE,
+           # Add risk table
+           tables.height = 0.3,
+           risk.table.title = "Risk table",
+           risk.table = TRUE,
+           risk.table.y.text = FALSE,
+           risk.table.fontsize = 4,
+           tables.theme = theme_survminer(base_size = 5,
+                                          font.main = c(14, "bold", "black"),
+                                          font.x = c(14, "bold", "black"),
+                                          font.y = c(14, "bold", "transparent"),
+                                          font.tickslab = c(14, "bold", "black"))
+)+ guides(colour = guide_legend(nrow = 3))
+DFS
+# PFS = survfit2(Surv(PFS_MONTHS, PFS_STATUS) ~ CH_status, data = luad.pfs) %>%
+#     ggsurvfit() +
+#     labs(
+#         x = "Months",
+#         y = "Progression-free survival probability"
+#         ) + 
+#     add_confidence_interval()+ annotate("text",x=100,y=1,label=paste0("p=",round(summary(t4)$coef[5],2)))
+myplot <- survfit2(Surv(PFS_MONTHS, PFS_STATUS) ~ CH_status, data = luad.pfs)
+PFS <- ggsurvplot(myplot, data = luad.pfs,
+           title = "Progression-free survival",
+           font.main = c(20, "bold", "black"),
+           font.x = c(16, "bold", "black"),
+           font.y = c(16, "bold", "black"),
+           font.legend = c(16, "bold", "black"),
+           font.tickslab = c(14, "bold", "black"),
+           size = 1.5,
+
+           xlab = "Time (months)",
+           legend = "top",
+           legend.title = "",
+           # legend.labs = c("White Non-Hispanic", "Hispanic", "Black"),
+           palette = c("darkred", "blue"),
+           pval = TRUE,
+           pval.coord = c(0, 0.08),
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE,
+           # Add risk table
+           tables.height = 0.3,
+           risk.table.title = "Risk table",
+           risk.table = TRUE,
+           risk.table.y.text = FALSE,
+           risk.table.fontsize = 4,
+           tables.theme = theme_survminer(base_size = 5,
+                                          font.main = c(14, "bold", "black"),
+                                          font.x = c(14, "bold", "black"),
+                                          font.y = c(14, "bold", "transparent"),
+                                          font.tickslab = c(14, "bold", "black"))
+)+ guides(colour = guide_legend(nrow = 3))
+PFS
+```
+
+# Avatar
+```{r avatar cleaning}
+germline_data1 <- bind_rows(germline_data %>% 
+                              rename(
+                               month_at_os = os_time
+                              ),
+                            germline_data_MM %>% 
+                              mutate(disease_type_conformed = "MM"))
+write_csv(germline_data1 %>% 
+            select(avatar_key, disease_type_conformed,
+                   CH_status,
+                   month_at_os, os_event,
+                   month_at_progression_drug, drug_progression_event),
+          "survival data for R01 multiple cancers.csv")
+```
+
+## Overall
+```{r, fig.height = 7}
+myplot <- survfit2(Surv(month_at_os, os_event) ~ CH_status, data = germline_data1)
+ggsurvplot(myplot, data = germline_data1,
+           title = "Overall survival",
+           font.main = c(20, "bold", "black"),
+           font.x = c(16, "bold", "black"),
+           font.y = c(16, "bold", "black"),
+           font.legend = c(16, "bold", "black"),
+           font.tickslab = c(14, "bold", "black"),
+           size = 1.5,
+           
+           xlab = "Time (months)", 
+           legend = "top",
+           legend.title = "",
+           # legend.labs = c("White Non-Hispanic", "Hispanic", "Black"),
+           palette = c("blue", "red"),
+           pval = TRUE,
+           pval.coord = c(0, 0.08),
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE,
+           # Add risk table
+           tables.height = 0.3,
+           risk.table.title = "Risk table",
+           risk.table = TRUE,
+           risk.table.y.text = FALSE,
+           risk.table.fontsize = 4,
+           tables.theme = theme_survminer(base_size = 5,
+                                          font.main = c(14, "bold", "black"),
+                                          font.x = c(14, "bold", "black"),
+                                          font.y = c(14, "bold", "transparent"),
+                                          font.tickslab = c(14, "bold", "black"))
+)+ guides(colour = guide_legend(nrow = 3))
+```
+
+## Startified by cancer
+### MM
+```{r, fig.height = 7}
+myplot <- survfit2(Surv(month_at_os, os_event) ~ CH_status, data = germline_data_MM)
+ggsurvplot(myplot, data = germline_data_MM,
+           title = "Overall survival",
+           font.main = c(20, "bold", "black"),
+           font.x = c(16, "bold", "black"),
+           font.y = c(16, "bold", "black"),
+           font.legend = c(16, "bold", "black"),
+           font.tickslab = c(14, "bold", "black"),
+           size = 1.5,
+           
+           xlab = "Time (months)", 
+           legend = "top",
+           legend.title = "",
+           # legend.labs = c("White Non-Hispanic", "Hispanic", "Black"),
+           palette = c("blue", "red"),
+           pval = TRUE,
+           pval.coord = c(0, 0.08),
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE,
+           # Add risk table
+           tables.height = 0.3,
+           risk.table.title = "Risk table",
+           risk.table = TRUE,
+           risk.table.y.text = FALSE,
+           risk.table.fontsize = 4,
+           tables.theme = theme_survminer(base_size = 5,
+                                          font.main = c(14, "bold", "black"),
+                                          font.x = c(14, "bold", "black"),
+                                          font.y = c(14, "bold", "transparent"),
+                                          font.tickslab = c(14, "bold", "black"))
+)+ guides(colour = guide_legend(nrow = 3))
+```
+
+PFS is only available for MM
+```{r, fig.height = 7}
+myplot <- survfit2(Surv(month_at_progression_drug, drug_progression_event) ~ CH_status, data = germline_data_MM)
+ggsurvplot(myplot, data = germline_data_MM,
+           title = "Progression-free survival",
+           font.main = c(20, "bold", "black"),
+           font.x = c(16, "bold", "black"),
+           font.y = c(16, "bold", "black"),
+           font.legend = c(16, "bold", "black"),
+           font.tickslab = c(14, "bold", "black"),
+           size = 1.5,
+           
+           xlab = "Time (months)", 
+           legend = "top",
+           legend.title = "",
+           # legend.labs = c("White Non-Hispanic", "Hispanic", "Black"),
+           palette = c("blue", "red"),
+           pval = TRUE,
+           pval.coord = c(0, 0.08),
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE,
+           # Add risk table
+           tables.height = 0.3,
+           risk.table.title = "Risk table",
+           risk.table = TRUE,
+           risk.table.y.text = FALSE,
+           risk.table.fontsize = 4,
+           tables.theme = theme_survminer(base_size = 5,
+                                          font.main = c(14, "bold", "black"),
+                                          font.x = c(14, "bold", "black"),
+                                          font.y = c(14, "bold", "transparent"),
+                                          font.tickslab = c(14, "bold", "black"))
+)+ guides(colour = guide_legend(nrow = 3))
+```
+
+
+```{r, fig.height = 7}
+breast_data <- germline_data1 %>%
+    filter(disease_type_conformed == "BRE - Breast Cancer")
+mysurv <- Surv(time = breast_data$month_at_os, event = breast_data$os_event)
+myplot <- survfit(mysurv~CH_status, data = breast_data)
+ggsurvplot(myplot, data = breast_data,
+           title = "OS from date of blood sample",
+           font.main = c(20, "bold", "black"),
+           font.x = c(16, "bold", "black"),
+           font.y = c(16, "bold", "black"),
+           font.legend = c(16, "bold", "black"),
+           font.tickslab = c(14, "bold", "black"),
+           size = 1.5,
+
+           xlab = "Time (years)",
+           legend = "top",
+           legend.title = "",
+           # legend.labs = c("White Non-Hispanic", "Hispanic", "Black"),
+           palette = c("blue", "red"),
+           pval = TRUE,
+           pval.coord = c(0, 0.08),
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE,
+           # Add risk table
+           tables.height = 0.3,
+           risk.table.title = "Risk table",
+           risk.table = TRUE,
+           risk.table.y.text = FALSE,
+           risk.table.fontsize = 4,
+           tables.theme = theme_survminer(base_size = 5,
+                                          font.main = c(14, "bold", "black"),
+                                          font.x = c(14, "bold", "black"),
+                                          font.y = c(14, "bold", "transparent"),
+                                          font.tickslab = c(14, "bold", "black")),
+)+ guides(colour = guide_legend(nrow = 3))
+
+# tbl1 <- breast_data %>%
+#   select(race, ethnicity, age_at_germline, stage,
+#          drugs_ever, radiation_ever, CH_status) %>%
+#   tbl_uvregression(method = survival::coxph,
+#                    y = (Surv(time = breast_data$os_time,
+#                              event = breast_data$os_event)),
+#                    exponentiate = TRUE) %>%
+#   bold_p(t = .05) %>% add_nevent(location = "level") %>%
+#   add_n(location = "level") %>%
+#   bold_labels() %>% italicize_levels()
+# tbl2 <- coxph(Surv(time = breast_data$os_time,
+#                    event = breast_data$os_event) ~
+#                 race + ethnicity + age_at_germline + stage +
+#                 drugs_ever + radiation_ever + CH_status,
+#               data =  breast_data) %>%
+#   tbl_regression(exponentiate = TRUE) %>% bold_p(t = .05)
+# tbl_merge(list(tbl1, tbl2), tab_spanner = c("**Univariable**", "**Multivariable**"))
+```
+No event in CH patients
+
+#### Ovarian
+```{r, fig.height = 7}
+ovarian_data <- germline_data1 %>%
+  filter(disease_type_conformed == "GYN - Ovarian Cancer")
+mysurv <- Surv(time = ovarian_data$month_at_os, event = ovarian_data$os_event)
+myplot <- survfit(mysurv~CH_status, data = ovarian_data)
+ggsurvplot(myplot, data = ovarian_data,
+           title = "OS from date of blood sample",
+           font.main = c(20, "bold", "black"),
+           font.x = c(16, "bold", "black"),
+           font.y = c(16, "bold", "black"),
+           font.legend = c(16, "bold", "black"),
+           font.tickslab = c(14, "bold", "black"),
+           size = 1.5,
+
+           xlab = "Time (years)",
+           legend = "top",
+           legend.title = "",
+           # legend.labs = c("White Non-Hispanic", "Hispanic", "Black"),
+           palette = c("blue", "red"),
+           pval = TRUE,
+           pval.coord = c(0, 0.08),
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE,
+           # Add risk table
+           tables.height = 0.3,
+           risk.table.title = "Risk table",
+           risk.table = TRUE,
+           risk.table.y.text = FALSE,
+           risk.table.fontsize = 4,
+           tables.theme = theme_survminer(base_size = 5,
+                                          font.main = c(14, "bold", "black"),
+                                          font.x = c(14, "bold", "black"),
+                                          font.y = c(14, "bold", "transparent"),
+                                          font.tickslab = c(14, "bold", "black")),
+)+ guides(colour = guide_legend(nrow = 3))
+
+# tbl1 <- ovarian_data %>%
+#   select(race, ethnicity, age_at_germline, stage,
+#          drugs_ever, radiation_ever, CH_status) %>%
+#   tbl_uvregression(method = survival::coxph,
+#                    y = (Surv(time = ovarian_data$os_time,
+#                              event = ovarian_data$os_event)),
+#                    exponentiate = TRUE) %>%
+#   bold_p(t = .05) %>% add_nevent(location = "level") %>%
+#   add_n(location = "level") %>%
+#   bold_labels() %>% italicize_levels()
+# tbl2 <- coxph(Surv(time = ovarian_data$os_time,
+#                    event = ovarian_data$os_event) ~
+#                 race + ethnicity + age_at_germline + stage +
+#                 drugs_ever + radiation_ever + CH_status,
+#               data =  ovarian_data) %>%
+#   tbl_regression(exponentiate = TRUE) %>% bold_p(t = .05)
+# tbl_merge(list(tbl1, tbl2), tab_spanner = c("**Univariable**", "**Multivariable**"))
+```
+<!-- If I remove ethnicity and drugs_ever, combine stage, remove race -->
+<!-- ```{r} -->
+<!-- ovarian_data <- ovarian_data %>% -->
+<!--   mutate(stage = case_when( -->
+<!--     stage == "0-I" | -->
+<!--     stage == "II"         ~ "0-II", -->
+<!--     TRUE                  ~ as.character(stage) -->
+<!--   )) -->
+<!-- tbl1 <- ovarian_data %>% -->
+<!--   select(age_at_germline, stage, -->
+<!--          radiation_ever, CH_status) %>% -->
+<!--   tbl_uvregression(method = survival::coxph, -->
+<!--                    y = (Surv(time = ovarian_data$os_time, -->
+<!--                              event = ovarian_data$os_event)), -->
+<!--                    exponentiate = TRUE) %>% -->
+<!--   bold_p(t = .05) %>% add_nevent(location = "level") %>% -->
+<!--   add_n(location = "level") %>% -->
+<!--   bold_labels() %>% italicize_levels() -->
+<!-- tbl2 <- coxph(Surv(time = ovarian_data$os_time, -->
+<!--                    event = ovarian_data$os_event) ~ -->
+<!--                 age_at_germline + stage + -->
+<!--                 radiation_ever + CH_status, -->
+<!--               data =  ovarian_data) %>% -->
+<!--   tbl_regression(exponentiate = TRUE) %>% bold_p(t = .05) -->
+<!-- tbl_merge(list(tbl1, tbl2), tab_spanner = c("**Univariable**", "**Multivariable**")) -->
+<!-- ``` -->
+
+
+#### Lung
+```{r, fig.height = 7}
+lung_data <- germline_data1 %>%
+  filter(disease_type_conformed == "THO - Lung Cancer")
+mysurv <- Surv(time = lung_data$month_at_os, event = lung_data$os_event)
+myplot <- survfit(mysurv~CH_status, data = lung_data)
+ggsurvplot(myplot, data = lung_data,
+           title = "OS from date of blood sample",
+           font.main = c(20, "bold", "black"),
+           font.x = c(16, "bold", "black"),
+           font.y = c(16, "bold", "black"),
+           font.legend = c(16, "bold", "black"),
+           font.tickslab = c(14, "bold", "black"),
+           size = 1.5,
+
+           xlab = "Time (years)",
+           legend = "top",
+           legend.title = "",
+           # legend.labs = c("White Non-Hispanic", "Hispanic", "Black"),
+           palette = c("blue", "red"),
+           pval = TRUE,
+           pval.coord = c(0, 0.08),
+           conf.int = FALSE,
+           # Censor
+           censor = TRUE,
+           # Add risk table
+           tables.height = 0.3,
+           risk.table.title = "Risk table",
+           risk.table = TRUE,
+           risk.table.y.text = FALSE,
+           risk.table.fontsize = 4,
+           tables.theme = theme_survminer(base_size = 5,
+                                          font.main = c(14, "bold", "black"),
+                                          font.x = c(14, "bold", "black"),
+                                          font.y = c(14, "bold", "transparent"),
+                                          font.tickslab = c(14, "bold", "black")),
+)+ guides(colour = guide_legend(nrow = 3))
+
+# tbl1 <- lung_data %>%
+#   select(race, ethnicity, age_at_germline, sex, stage,
+#          drugs_ever, radiation_ever, CH_status) %>%
+#   tbl_uvregression(method = survival::coxph,
+#                    y = (Surv(time = lung_data$os_time,
+#                              event = lung_data$os_event)),
+#                    exponentiate = TRUE) %>%
+#   bold_p(t = .05) %>% add_nevent(location = "level") %>%
+#   add_n(location = "level") %>%
+#   bold_labels() %>% italicize_levels()
+# tbl2 <- coxph(Surv(time = lung_data$os_time,
+#                    event = lung_data$os_event) ~
+#                 race + ethnicity + age_at_germline + sex + stage +
+#                 drugs_ever + radiation_ever + CH_status,
+#               data =  lung_data) %>%
+#   tbl_regression(exponentiate = TRUE) %>% bold_p(t = .05)
+# tbl_merge(list(tbl1, tbl2), tab_spanner = c("**Univariable**", "**Multivariable**"))
+```
+<!-- If I remove race, ethnicity, stage, remove drugs -->
+<!-- ```{r} -->
+<!-- tbl1 <- lung_data %>% -->
+<!--   select(age_at_germline, sex, radiation_ever, CH_status) %>% -->
+<!--   tbl_uvregression(method = survival::coxph, -->
+<!--                    y = (Surv(time = lung_data$os_time, -->
+<!--                              event = lung_data$os_event)), -->
+<!--                    exponentiate = TRUE) %>% -->
+<!--   bold_p(t = .05) %>% add_nevent(location = "level") %>% -->
+<!--   add_n(location = "level") %>% -->
+<!--   bold_labels() %>% italicize_levels() -->
+<!-- tbl2 <- coxph(Surv(time = lung_data$os_time, -->
+<!--                    event = lung_data$os_event) ~ -->
+<!--                 age_at_germline + sex + -->
+<!--                 radiation_ever + CH_status, -->
+<!--               data =  lung_data) %>% -->
+<!--   tbl_regression(exponentiate = TRUE) %>% bold_p(t = .05) -->
+<!-- tbl_merge(list(tbl1, tbl2), tab_spanner = c("**Univariable**", "**Multivariable**")) -->
+<!-- ``` -->
+
+
+<br>
