@@ -1,163 +1,18 @@
----
-title: "R01 data cleaning"
-author: "Christelle Colin-Leitzinger"
-date: '`r Sys.Date()`'
-output: 
-  html_document:
-    toc: true
-    toc_float: true
-    toc_depth: 4
-    toc_collapsed: false
-    theme: united
-    highlight: pygments
-    df_print: paged
-editor_options: 
-  chunk_output_type: console
----
-
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE,
-                      warning = FALSE,
-                      message = FALSE,
-                      cache = FALSE,
-                      fig.align='center'
-                      )
-```
-
-```{r library}
 library(tidyverse)
 library(data.table)
-library(labelled)
-library(gtsummary)
-library(survival)
-library(survminer)
-theme_set(theme_classic())
-theme_gtsummary_compact()
-```
 
-```{r path}
-path <- fs::path("", "Volumes", "Lab_Gillis","ORIEN_Avatar", "resources")
-path_dir <- fs::path("", "Volumes", "Gillis_Research","Lab_Data", "CHinORIEN")
-```
-
-
-```{r load}
-# Load each file in its own dataframe
-# filenames <- list.files(path = paste0(path, "/23PRJ127MCC_NormalizedFiles"),
-#                         pattern = "23PRJ127MCC_20230620_.*.csv")
-# names <- str_match(filenames, "23PRJ127MCC_20230620_(.*)_V4.csv")[,2]
-#
-# for(i in names){
-#     filepath <- file.path(paste0(path, "/23PRJ127MCC_NormalizedFiles/",paste("23PRJ127MCC_20230620_", i, "_V4.csv",sep="")))
-#     assign(i, read.csv(filepath, na.strings = ""))
-# }
-#
-# rm(filenames, names, filepath, i)
-
-# Saved environment image in a .Rdata
+# I. Load data ----
 load("~/Documents/GitHub/Gillis/ch_orien/Rmd/R01 Gillis-Teng 2023-2024/initial_files.RData")
 
-CH_status_lung_BW <-
-  readxl::read_xlsx(paste0(path_dir, "/ProcessedData/CHinOREIN_LungCHIP_20250708.xlsx"))
-CH_status_breast_BW <-
-  readxl::read_xlsx(paste0(path_dir, "/ProcessedData/CHinORIEN_BreastCHIP_20250708.xlsx"))
-CH_status_crc_BW <-
-  readxl::read_xlsx(paste0(path_dir, "/ProcessedData/CHinORIEN_ColorectalCHIP_20250708.xlsx"))
-CH_status_prostate_BW <-
-  readxl::read_xlsx(paste0(path_dir, "/ProcessedData/CHinORIEN_ProstateCHIP_20250708.xlsx"))
-CH_status_mm_BW <-
-  readxl::read_xlsx(paste0(path_dir, "/ProcessedData/CHinORIEN_MMCHIP_20250709.xlsx"))
-
-CH_status_lung_sample <-
-  read.delim(paste0(path_dir, "/ProcessedData/SampleList",
-                    "/Lung_sample_with_Avatar_remove_duplicated_wRNA.txt"))
-CH_status_breast_sample <-
-  read.delim(paste0(path_dir, "/ProcessedData/SampleList",
-                    "/Breast_sample_with_Avatar_remove_duplicated_wRNA.txt"))
-CH_status_crc_sample <-
-  read.delim(paste0(path_dir, "/ProcessedData/SampleList",
-                    "/Colorectal_sample_with_Avatar_remove_duplicated_wRNA.txt"))
-CH_status_prostate_sample <-
-  read.delim(paste0(path_dir, "/ProcessedData/SampleList",
-                    "/Prostate_sample_with_Avatar_remove_duplicated_wRNA.txt"))
-CH_status_mm_sample <-
-  read.delim(paste0(path_dir, "/ProcessedData/SampleList",
-                    "/MM_sample_with_Avatar_remove_duplicated_wRNA.txt"))
-
-CH_sample <- bind_rows(CH_status_lung_sample %>% mutate(cancer_type = "Lung"),
-                       CH_status_breast_sample %>% mutate(cancer_type = "Breast"),
-                       CH_status_prostate_sample %>% mutate(cancer_type = "Prostate"),
-                       CH_status_mm_sample %>% mutate(cancer_type = "MM"),
-                       CH_status_crc_sample %>% mutate(cancer_type = "Colorectal")) %>% 
-  rename(Germline_WES = Germline)
-CH_status <- bind_rows(CH_status_lung_BW %>% mutate(cancer_type = "Lung"),
-                       CH_status_breast_BW %>% mutate(cancer_type = "Breast"),
-                       CH_status_prostate_BW %>% mutate(cancer_type = "Prostate"),
-                       CH_status_mm_BW %>% mutate(cancer_type = "MM"),
-                       CH_status_crc_BW %>% mutate(cancer_type = "Colorectal")) %>% 
-  rename(Germline_WES = patient_id, 
-         Tumor_WES = Tumor) %>% 
-  mutate(Tumor_WES = str_remove(Tumor_WES, "_st_t")) %>% 
-  # Mutattion in Tumor if VAF is not "."
-  group_by(ORIENAvatarKey, cancer_type) %>% 
-  mutate(CH_detected_in_tumor = any(!Tumor_VAF==".")) %>% 
-  ungroup() %>% 
-  distinct(ORIENAvatarKey, Germline_WES, Tumor_WES, cancer_type,  .keep_all = TRUE) %>%
-  mutate(ch_status = "CH") %>% 
-  select(ORIENAvatarKey, Germline_WES, Tumor_WES, cancer_type,
-         ch_status, CH_detected_in_tumor)
-
-
-CH_status <- full_join(CH_sample,
-                        CH_status,
-                        by = c("ORIENAvatarKey", 
-                               "Germline_WES",
-                               "Tumor_WES",
-                               "cancer_type")) %>% 
-  mutate(ch_status = case_when(
-    ch_status == "CH"                 ~ "CH",
-    TRUE                              ~ "No CH"
-  ))
-
-
-# breast_samples <- 
-#   read.delim(paste0(here::here(), "/Rmd/R01 Gillis-Teng 2023-2024/Breast_sample_list.txt"))
-# colorectal_samples <- 
-#   read.delim(paste0(here::here(), "/Rmd/R01 Gillis-Teng 2023-2024/Colorectal_sample_list.txt"))
-# mm_samples <- 
-#   read.delim(paste0(here::here(), "/Rmd/R01 Gillis-Teng 2023-2024/MM_sample_list.txt"))
-
+path <- fs::path("", "Volumes", "Lab_Gillis","Data", "ORIEN")
+mm_samples <- 
+  readxl:::read_xlsx(paste0(path, "/ORIEN_conference/data_from_YiHan/ORIEN_MM_sample_list.xlsx"))
 MSI_marker <-
   readxl::read_xlsx(paste0(here::here(), 
                            "/Rmd/R01 Gillis-Teng 2023-2024/MSI_23PRJ127MCC_20230620.xlsx"))
-```
 
-Diagnosis :
-- Do we want to include only patients who are seen for a primary diagnosis?
-
-```{r CH status}
-# CH_status <- CH_status %>%
-#   bind_rows(., mm_samples %>% 
-#               mutate(cancer_type = "HEM - Myeloma Spectrum")) %>%
-#   rename(AvatarKey = ORIENAvatarKey) %>%
-#   # mutate_at(c("CH_status_using_BickWHO", "CH_status_using_pipeline"), ~ case_when(
-#   #   . == "TRUE"           ~ "CH",
-#   #   . == "FALSE"          ~ "No CH",
-#   #   is.na(.)              ~ "No data"
-#   # )) %>% 
-#   mutate_at(c("CH_status_using_BickWHO"#, "CH_status_using_pipeline"
-#               ), ~ factor(
-#     ., levels = c("No CH", "CH"#, "No data"
-#                   ))) #%>%
-  # select(-CHIP) %>%
-  # distinct(AvatarKey, CH_status_using_BickWHO, .keep_all = TRUE) %>% 
-  # arrange(AvatarKey, desc(CH_status_using_BickWHO)) %>% 
-  # distinct(AvatarKey, cancer_type, .keep_all = TRUE)
-
-(which(duplicated(CH_status$AvatarKey)))
-```
-
-```{r cytogenetics cleaning}
+# II. Clean data ----
+# Cytogenetic ----
 CytogeneticAbnormalities <- CytogeneticAbnormalities %>%
   filter(CytogenAbnormResult == "Positive")
 
@@ -165,16 +20,11 @@ CytogeneticAbnormalities <-
   CytogeneticAbnormalities %>%
   select(AvatarKey, CytogenAbnormName, CytogenAbnormInd) %>%
   distinct() %>%
-  # group_by(AvatarKey, hormone_therapy_start_date) %>%
   pivot_wider(id_cols = c(AvatarKey),
-    names_from = CytogenAbnormName,
+              names_from = CytogenAbnormName,
               values_from = CytogenAbnormInd)
-```
 
-```{r demo cleaning}
-table(PatientMaster$Race)
-table(PatientMaster$Ethnicity)
-
+# Demographics ----
 demographics <- PatientMaster %>%
   mutate(Race = case_when(
     str_detect(Race, "American Indian")        ~ "American Indian or Alaska Native",
@@ -214,37 +64,45 @@ demographics <- PatientMaster %>%
     Race == "Others" &
       Ethnicity == "Non-Hispanic"              ~ "Others Non-Hispanic",
     Ethnicity == "Hispanic"                    ~ "Hispanic"
-  ))%>% 
-  mutate(Race = factor(Race, levels = c("White", "Black", "Asian",
-                                        "American Indian or Alaska Native", "Native Hawaiian or Other Pacific Islander",
-                                        "Unknown")))
+  ))# %>% 
+  # mutate(Race = factor(Race, levels = c("White", "Black", "Asian",
+  #                                       "American Indian or Alaska Native", "Native Hawaiian or Other Pacific Islander",
+  #                                       "Unknown")))
 
-rm(PatientMaster)
-```
-
-```{r patient history - smoking}
+# Patient History----
 PatientHistory <- PatientHistory %>%
   mutate(SmokingStatus = case_when(
     SmokingStatus == "Never"                   ~ "Never",
     SmokingStatus == "Current" |
       str_detect(SmokingStatus, "Ever")        ~ "Ever"
   ), SmokingStatus = factor(SmokingStatus, levels = c("Never", "Ever")))
-```
 
-```{r Diagnosis}
+# Diagnosis ----
+Diagnosis_save <- Diagnosis
+Diagnosis <- Diagnosis_save
+
 Diagnosis %>%
   select(PrimaryDiagnosisSite, PrimaryDiagnosisSiteCode) %>%
   distinct() %>%
   arrange(PrimaryDiagnosisSiteCode, PrimaryDiagnosisSite)
 
-Diagnosis <- Diagnosis %>%
+Diagnosis1 <- Diagnosis %>%
   select(AvatarKey, AgeAtDiagnosis, YearOfDiagnosis,
          PrimaryDiagnosisSiteCode : Histology,
          ClinGroupStage,
          CurrentlySeenForPrimaryOrRecurr,
          PerformStatusAtDiagnosis, 
          OtherStagingSystem, OtherStagingValue) %>%
-  mutate(across(c("AgeAtDiagnosis"), ~ case_when(
+  # join and filter by patients with MM samples
+  inner_join(mm_samples %>% 
+               rename("AvatarKey" = "ORIENAvatarKey"), .,
+             by = c("AvatarKey")) %>% 
+  mutate(not_real_age = case_when(
+    AgeAtDiagnosis == "Age 90 or older"   ~ "Age 90 or older"
+  )) %>%
+  # mutate(Age.At.Specimen.Collection = as.numeric(Age.At.Specimen.Collection)) %>% 
+  mutate(across(c("AgeAtDiagnosis", 
+                  "Age.At.Specimen.Collection"), ~ case_when(
     . == "Age 90 or older"                ~ 90,
     . == "Unknown/Not Applicable"         ~ NA_real_,
     TRUE                                  ~ as.numeric(.)
@@ -254,18 +112,122 @@ Diagnosis <- Diagnosis %>%
   mutate(iss_stage = case_when(
     OtherStagingSystem == "ISS"           ~ OtherStagingValue
   )) %>% 
+  
   arrange(AvatarKey, AgeAtDiagnosis) %>%
   group_by(AvatarKey) %>%
-  mutate(diagnosis_sequence = row_number(AvatarKey), .after = AvatarKey) %>%
-  mutate(has_subsequent_cancer = case_when(
-    diagnosis_sequence > 1                ~ "Yes"
-  )) %>%
-  fill(has_subsequent_cancer, iss_stage, .direction = "updown") %>%
-  ungroup()
+  mutate(how_many_dx = n(), .after = AvatarKey) %>%
+  mutate(cancer_sequence = row_number(AvatarKey), .after = AvatarKey) %>%
+  mutate(had_MM_at_anytime = case_when(
+    Histology == "Multiple myeloma"       ~ "Yes"
+  )) %>% 
+  group_by(AvatarKey, Histology) %>% 
+  mutate(MM_sequence  = case_when(
+    Histology == "Multiple myeloma"       ~ as.character(row_number(Histology)),
+    TRUE                                  ~ paste0(Histology, " (",PrimaryDiagnosisSite, ")")
+    ), MM_sequence = case_when(
+      MM_sequence == "1"                  ~ "1st MM dx",
+      MM_sequence == "2"                  ~ "2nd MM dx",
+      MM_sequence == "3"                  ~ "3rd MM dx",
+      TRUE                                ~ MM_sequence
+    )) %>% 
+  mutate(age_at_first_MM_dx = case_when(
+    MM_sequence == "1st MM dx"            ~ AgeAtDiagnosis
+  )) %>% 
+  mutate(age_at_last_MM_dx = case_when(
+    MM_sequence == "3rd MM dx"            ~ AgeAtDiagnosis,
+    MM_sequence == "2nd MM dx"            ~ AgeAtDiagnosis,
+    MM_sequence == "1st MM dx"            ~ AgeAtDiagnosis
+  )) %>% 
+  mutate(age_at_MGUS_dx = case_when(
+    Histology == "Monoclonal gammopathy"  ~ AgeAtDiagnosis
+  )) %>% 
+  group_by(AvatarKey) %>% 
+  fill(had_MM_at_anytime, age_at_first_MM_dx,
+       age_at_last_MM_dx, age_at_MGUS_dx, .direction = "updown") %>% 
+  ungroup() %>% 
+  # mutate(suid = AvatarKey) %>% 
+  # mutate(sample_age = Age.At.Specimen.Collection) %>% 
+  mutate(is_patient_MM = case_when(
+    age_at_last_MM_dx >= age_at_MGUS_dx   ~ "Yes",
+    age_at_last_MM_dx < age_at_MGUS_dx    ~ "MGUS patient",
+    had_MM_at_anytime == "Yes"            ~ "Yes",
+    is.na(had_MM_at_anytime)              ~ "No"
+  )) %>% 
+  mutate(sample_is_for_MM_dx = case_when(
+    is_patient_MM == "MGUS patient"       ~ "No",
+    is_patient_MM == "No"                 ~ "No",
+    !is.na(age_at_MGUS_dx) &
+      Age.At.Specimen.Collection > 
+      age_at_MGUS_dx                      ~ "Yes",
+    !is.na(age_at_MGUS_dx) &
+      age_at_last_MM_dx == 
+      age_at_MGUS_dx                      ~ "Yes",
+    had_MM_at_anytime == "Yes"            ~ "Yes"
+  ))
+  
+  # ungroup()
+  # 
+  # mutate(time_diff_dx_blood_days = case_when(
+  #   Histology == "Multiple myeloma"       ~ round(
+  #     (Age.At.Specimen.Collection - AgeAtDiagnosis) * 365.25,
+  #     0)
+  # ), .after = AvatarKey)
+#   select("AvatarKey", "how_many_dx", "MM_sequence", cancer_sequence,
+#          "time_diff_dx_blood_days",
+#          AgeAtDiagnosis, Age.At.Specimen.Collection, Histology) %>% 
+#   group_by(AvatarKey) %>% 
+#   mutate(min_time = min(time_diff_dx_blood_days), .after = time_diff_dx_blood_days) %>% 
+#   ungroup() %>% 
+#   mutate(which_dx_is_blood_from = case_when(
+#     how_many_dx == 1 &
+#       time_diff_dx_blood_days == min_time            ~ MM_sequence,
+#     
+#     how_many_dx > 1 &
+#       time_diff_dx_blood_days == min_time            ~ MM_sequence
+#   ), .after = min_time)
+#   
+# a <- Diagnosis1 %>% filter(how_many_dx > 1)
+# b <- Diagnosis1 %>% filter(how_many_dx == 1)
+
+
+  # mutate(blood_is_in_range = case_when(
+  #   Histology == "Multiple myeloma" &
+  #     time_diff_dx_blood_days <= -7                     ~ "Yes"
+  # ), .after = time_diff_dx_blood_days) 
+  # # mutate(MM_first_dx_age = case_when(
+  # #   Histology == "Multiple myeloma" &
+  # #     MM_sequence == 1                  ~ AgeAtDiagnosis
+  # # )) %>% 
+  # # mutate(is_blood_at_MMdx = case_when(
+  # #   Age.At.Specimen.Collection * 365.25 >= 
+  # #     (MM_first_dx_age * 365.25 - 7)            ~ "Yes"
+  # # )) %>% 
+  # mutate(is_blood_at_MMdx = case_when(
+  #   blood_is_after == "Yes" &
+  #     MM_sequence == 1 &
+  #     time_diff_dx_blood_days == min_time            ~ "Yes"
+  # )) %>% 
+  # mutate(sample_closest_to = case_when(
+  #   time_diff_dx_blood_days == min_time              ~ MM_sequence
+  # )) %>% 
+  # fill(is_blood_at_MMdx, which_dx_is_blood_from,
+  #      sample_closest_to,
+  #      had_MM_at_anytime, MM_first_dx_age,
+  #      iss_stage, .direction = "updown") %>%
+  # ungroup() %>% 
+  
+  # select("AvatarKey","how_many_dx","MM_sequence",cancer_sequence,"MM_first_dx_age",
+  #        "time_diff_dx_blood_days","blood_is_after","min_time","is_blood_at_MMdx",
+  #        AgeAtDiagnosis, Age.At.Specimen.Collection, Histology)
+  # select(AvatarKey, MM_sequence, everything())
+  
+
 
 subsequent_diagnosis <- Diagnosis %>%
+  arrange(AvatarKey, AgeAtDiagnosis) %>% 
   group_by(AvatarKey) %>%
   summarise_at(vars(PrimaryDiagnosisSite, PrimaryDiagnosisSiteCode,
+                    Histology,
                     AgeAtDiagnosis), str_c, collapse = "; ") %>%
   ungroup() %>%
   separate_wider_delim(cols = PrimaryDiagnosisSite, delim = "; ",
@@ -276,24 +238,29 @@ subsequent_diagnosis <- Diagnosis %>%
                        names = c("PrimaryDiagnosisSiteCode", "subsequent_cancer_PrimaryDiagnosisSiteCode"),
                        too_few = "align_start", too_many = "merge",
                        cols_remove = TRUE) %>%
+  separate_wider_delim(cols = Histology, delim = "; ",
+                       names = c("Histology", "subsequent_cancer_Histology"),
+                       too_few = "align_start", too_many = "merge",
+                       cols_remove = TRUE) %>%
   separate_wider_delim(cols = AgeAtDiagnosis, delim = "; ",
                        names = c("AgeAtDiagnosis", "subsequent_cancer_AgeAtDiagnosis"),
                        too_few = "align_start", too_many = "merge",
                        cols_remove = TRUE) %>%
   select(-c(PrimaryDiagnosisSite, PrimaryDiagnosisSiteCode,
+            Histology,
             AgeAtDiagnosis))
 
-Diagnosis <- Diagnosis %>%
+Diagnosis <- Diagnosis1 %>%
+  arrange(AvatarKey, AgeAtDiagnosis) %>% 
   distinct(AvatarKey, .keep_all = TRUE) %>%
-  full_join(., subsequent_diagnosis,
-            by = c("AvatarKey"))
+  left_join(., subsequent_diagnosis,
+            by = c("AvatarKey")) #%>% 
+  # mutate(is_MM_first_dx = case_when(
+  #   MM_dx_age == AgeAtDiagnosis           ~ "Yes",
+  #   TRUE                                  ~ "No"
+  # ))
 
-rm(subsequent_diagnosis)
-# Diagnosis_wide <- dcast(setDT(Diagnosis_), AvatarKey + has_subsequent_cancer ~ rowid(AvatarKey),
-#       value.var = c("Medication"))
-```
-
-```{r vitals}
+# VitalStatus----
 VitalStatus <- VitalStatus %>%
   select(AvatarKey, VitalStatus, AgeAtLastContact, AgeAtDeath) %>%
   mutate(across(c("AgeAtLastContact", "AgeAtDeath"), ~ case_when(
@@ -301,9 +268,8 @@ VitalStatus <- VitalStatus %>%
     . == "Unknown/Not Applicable"         ~ NA_real_,
     TRUE                                  ~ as.numeric(.)
   )))
-```
 
-```{r outcomes}
+# Outcomes----
 Outcomes1 <- Outcomes %>%
   inner_join(., Diagnosis %>%
                select(AvatarKey, PrimaryDiagnosisSiteCode, PrimaryDiagnosisSite),
@@ -332,10 +298,7 @@ Outcomes <- Outcomes1 %>%
   distinct(AvatarKey, .keep_all = TRUE) %>%
   mutate(has_outcomes_data = "Yes")
 
-rm(Outcomes1, Outcomes2)
-```
-
-```{r metastasis}
+# MetastaticDisease----
 MetastaticDisease1 <- MetastaticDisease %>%
   # For the patient with a diagnosis site
   inner_join(., Diagnosis %>%
@@ -365,10 +328,7 @@ MetastaticDisease <- MetastaticDisease1 %>%
   distinct(AvatarKey, .keep_all = TRUE) %>%
   mutate(has_metastasis_data = "Yes")
 
-rm(MetastaticDisease1, MetastaticDisease2)
-```
-
-```{r medication}
+# Medications----
 Medications <- Medications %>%
   filter(MedicationInd != "(Migrated) Cannot determine from available documentation")
 
@@ -403,22 +363,26 @@ Medications <- Medications1 %>%
 
 Medications1 <- Medications %>%
   arrange(AvatarKey, AgeAtMedStart, Medication, AgeAtMedStop) %>%
-  group_by(AvatarKey, AgeAtMedStart, MedicationInd) %>%
+  mutate(received_imids = case_when(
+    str_detect(Medication, "domide")       ~ "Yes",
+    Medication %in% c("Revlimid",
+                      "Pomalyst")         ~ "Yes"
+  )) %>% 
+  group_by(AvatarKey) %>% 
+  fill(received_imids, .direction = "updown") %>% 
+  group_by(AvatarKey, AgeAtMedStart, MedicationInd, received_imids) %>%
   summarise_at(vars(Medication, AgeAtMedStop), str_c, collapse = "; ") %>%
   ungroup()
 
 library(data.table)
 Medications <- dcast(setDT(Medications1),
-      AvatarKey + MedicationInd ~ rowid(AvatarKey),
-      value.var = c("AgeAtMedStart", "Medication", "AgeAtMedStop")) %>%
-  select(AvatarKey, drugs_ever = MedicationInd, AgeAtMedStart_1 : AgeAtMedStart_10,
+                     AvatarKey + received_imids + MedicationInd ~ rowid(AvatarKey),
+                     value.var = c("AgeAtMedStart", "Medication", "AgeAtMedStop")) %>%
+  select(AvatarKey, received_imids, drugs_ever = MedicationInd, AgeAtMedStart_1 : AgeAtMedStart_10,
          Medication_1 : Medication_10, AgeAtMedStop_1 : AgeAtMedStop_10) %>%
   mutate(has_medication_data = "Yes")
 
-rm(Medications1, Medications2)
-```
-
-```{r sct}
+# StemCellTransplant----
 StemCellTransplant1 <- StemCellTransplant %>%
   # For the patient with a diagnosis site
   inner_join(., Diagnosis %>%
@@ -448,10 +412,7 @@ StemCellTransplant <- StemCellTransplant1 %>%
   distinct(AvatarKey, .keep_all = TRUE) %>%
   mutate(has_stemcell_data = "Yes")
 
-rm(StemCellTransplant1, StemCellTransplant2)
-```
-
-```{r radiation}
+# Radiation----
 Radiation <- Radiation %>%
   filter(RadiationTherapyInd != "(Migrated) Cannot determine from available documentation")
 
@@ -484,10 +445,7 @@ Radiation <- Radiation1 %>%
   distinct(AvatarKey, .keep_all = TRUE) %>%
   mutate(has_radiation_data = "Yes")
 
-rm(Radiation1, Radiation2)
-```
-
-```{r surgery}
+# SurgeryBiopsy----
 SurgeryBiopsy <- SurgeryBiopsy %>%
   filter(SurgeryBiopsyInd != "(Migrated) Cannot determine from available documentation")
 
@@ -528,14 +486,11 @@ SurgeryBiopsy <- SurgeryBiopsy1 %>%
   )) %>%
   mutate(has_surgery_data = "Yes")
 
-rm(SurgeryBiopsy1, SurgeryBiopsy2)
-```
-
-```{r physical}
+# PhysicalAssessment----
 PhysicalAssessment <- PhysicalAssessment %>%
   left_join(., Diagnosis %>%
-               select(AvatarKey, AgeAtDiagnosis),
-             by = c("AvatarKey")) %>%
+              select(AvatarKey, AgeAtDiagnosis),
+            by = c("AvatarKey")) %>%
   mutate(across(c("AgeAtPhysicalExam"), ~ case_when(
     . == "Age 90 or older"                ~ 90,
     . == "Unknown/Not Applicable"         ~ NA_real_,
@@ -556,9 +511,8 @@ PhysicalAssessment <- PhysicalAssessment %>%
     BMI >= 30                   ~ "Obese"
   )) %>%
   mutate(bmi_cat = factor(bmi_cat, levels = c("Underweight", "Healthy", "Overweight", "Obese")))
-```
 
-```{r iss_staging}
+# Labs for ISS----
 serum_albumin <- Labs %>%
   filter(LabTest == "Albumin (Serum)") %>% 
   mutate(across(c("AgeAtLabResults"), ~ case_when(
@@ -568,8 +522,8 @@ serum_albumin <- Labs %>%
   ))) %>%
   mutate(across(where(is.character), ~ na_if(., "Unknown/Not Applicable"))) %>%
   left_join(., Diagnosis %>%
-               select(AvatarKey, AgeAtDiagnosis),
-             by = c("AvatarKey")) %>%
+              select(AvatarKey, AgeAtDiagnosis),
+            by = c("AvatarKey")) %>%
   mutate(int = abs(AgeAtLabResults - AgeAtDiagnosis)) %>%
   arrange(AvatarKey, int) %>%
   distinct(AvatarKey, .keep_all = TRUE) %>% 
@@ -605,8 +559,8 @@ iss_b2_ <- Labs %>%
 b2_globulin <- bind_rows(iss_b2, iss_b2_) %>% 
   arrange(AvatarKey, AgeAtTumorMarkerTest) %>% 
   left_join(., Diagnosis %>%
-               select(AvatarKey, AgeAtDiagnosis),
-             by = c("AvatarKey")) %>%
+              select(AvatarKey, AgeAtDiagnosis),
+            by = c("AvatarKey")) %>%
   mutate(int = abs(AgeAtTumorMarkerTest - AgeAtDiagnosis)) %>%
   arrange(AvatarKey, int) %>%
   distinct(AvatarKey, .keep_all = TRUE) %>% 
@@ -641,11 +595,8 @@ Diagnosis <- Diagnosis %>%
             by = "AvatarKey") %>% 
   mutate(iss_stage = coalesce(iss_stage, iss_stage_calculated))
 
-rm(serum_albumin, iss_b2, iss_b2_, iss_stage_calculated)
-```
 
-
-```{r tumor markers}
+# TumorMarker----
 TumorMarker <- TumorMarker %>%
   mutate(across(c("AgeAtTumorMarkerTest"), ~ case_when(
     . == "Age 90 or older"                ~ 90,
@@ -685,7 +636,7 @@ TumorMarker <- TumorMarker %>%
   mutate(clean_her2 = case_when(
     str_detect(marker_test, "HER2") & 
       (TMarkerResult == "Positive" | 
-       TMarkerResult == "Negative")                ~ TMarkerResult,
+         TMarkerResult == "Negative")                ~ TMarkerResult,
     str_detect(marker_test, "HER2") & 
       TMarkerResult == "Amplified"                 ~ "Positive"
   ), .after = marker_test) %>% 
@@ -734,20 +685,18 @@ MSI_marker <- MSI_marker %>%
     `MSIsensor2 Score` < 20        ~ "No"
   )) %>% 
   select(ORIENAvatarKey, `WES SLID`, MSI_high_score)
-```
 
-```{r family history}
+# FamilyHistory----
 FamilyHistory <- FamilyHistory %>%
   arrange(AvatarKey, desc(CancerInFamilyInd)) %>%
   distinct(AvatarKey, .keep_all = TRUE) %>%
   select(AvatarKey, CancerInFamilyInd)
-```
 
-```{r last date available}
+# last_date----
 last_date <- bind_rows(
   Imaging %>% select(AvatarKey, age_at_lab = AgeAtImageScan),
   Labs %>% select(AvatarKey, age_at_lab = AgeAtLabResults)
-  ) %>%
+) %>%
   mutate(across(c("age_at_lab"), ~ case_when(
     . == "Age 90 or older"                ~ 90,
     . == "Unknown/Not Applicable"         ~ NA_real_,
@@ -756,10 +705,7 @@ last_date <- bind_rows(
   arrange(AvatarKey, desc(age_at_lab)) %>%
   distinct(AvatarKey, .keep_all = TRUE)
 
-rm(Imaging, Labs)
-```
-
-```{r sequencing}
+# TumorSequencing----
 TumorSequencing <- TumorSequencing %>%
   filter(TumorSequencingInd == "Yes") %>%
   select(AvatarKey, AgeAtTumorSequencing) %>%
@@ -789,69 +735,39 @@ Germline_wes <-
 ClinicalMolLinkage <- full_join(Germline_wes, Tumor_wes,
                                 by = "ORIENAvatarKey")
 
-CH_status <- CH_status %>%
-  left_join(., ClinicalMolLinkage,
-            by = c("ORIENAvatarKey", "Germline_WES", "Tumor_WES")) %>%
-  mutate(across(c("germline_collection_age",
-                  "tumor_collection_age"), ~ case_when(
-    . == "Age 90 or older"                ~ 90,
-    . == "Unknown/Not Applicable"         ~ NA_real_,
-    TRUE                                  ~ as.numeric(.)
-  )))
-rm(Tumor_wes, Germline_wes)
-```
+# CH_status <- CH_status %>%
+#   left_join(., ClinicalMolLinkage,
+#             by = c("AvatarKey" = "ORIENAvatarKey", "Germline_WES", "Tumor_WES")) %>%
+#   mutate(across(c("germline_collection_age",
+#                   "tumor_collection_age"), ~ case_when(
+#                     . == "Age 90 or older"                ~ 90,
+#                     . == "Unknown/Not Applicable"         ~ NA_real_,
+#                     TRUE                                  ~ as.numeric(.)
+#                   )))
 
 
 
 
-
-
-
-
-
-
-<!-- 19601 patients -->
-
-```{r Merge data}
-data <- CH_status %>%
-  rename(AvatarKey = ORIENAvatarKey) %>% 
-  full_join(., demographics, by = "AvatarKey") %>%
-  full_join(., PatientHistory %>%
+# III. Join data----
+data <- 
+  left_join(Diagnosis, demographics, by = "AvatarKey") %>%
+  left_join(., PatientHistory %>%
               select(AvatarKey, SmokingStatus),
             by = "AvatarKey") %>%
-  full_join(., VitalStatus, by = "AvatarKey") %>%
-  full_join(., Diagnosis, by = "AvatarKey") %>%
-  full_join(., CytogeneticAbnormalities, by = "AvatarKey") %>%
-  full_join(., TumorMarker, by = "AvatarKey") %>%
-  full_join(., PhysicalAssessment, by = "AvatarKey") %>%
-  full_join(., Medications, by = "AvatarKey") %>%
-  full_join(., StemCellTransplant, by = "AvatarKey") %>%
-  full_join(., Radiation, by = "AvatarKey") %>%
-  full_join(., SurgeryBiopsy, by = "AvatarKey") %>%
-  full_join(., Outcomes, by = "AvatarKey") %>%
-  full_join(., MetastaticDisease, by = "AvatarKey") %>%
-  full_join(., last_date, by = "AvatarKey") %>%
-  full_join(., FamilyHistory, by = "AvatarKey")
-```
+  left_join(., VitalStatus, by = "AvatarKey") %>%
+  left_join(., CytogeneticAbnormalities, by = "AvatarKey") %>%
+  left_join(., TumorMarker, by = "AvatarKey") %>%
+  left_join(., PhysicalAssessment, by = "AvatarKey") %>%
+  left_join(., Medications, by = "AvatarKey") %>%
+  left_join(., StemCellTransplant, by = "AvatarKey") %>%
+  left_join(., Radiation, by = "AvatarKey") %>%
+  left_join(., SurgeryBiopsy, by = "AvatarKey") %>%
+  left_join(., Outcomes, by = "AvatarKey") %>%
+  left_join(., MetastaticDisease, by = "AvatarKey") %>%
+  left_join(., last_date, by = "AvatarKey") %>%
+  left_join(., FamilyHistory, by = "AvatarKey")
 
-
-```{r cleanup}
-# rm(demographics, VitalStatus, Diagnosis,
-#    CytogeneticAbnormalities, TumorMarker,
-#    PhysicalAssessment, Medications,
-#    StemCellTransplant, Radiation,
-#    SurgeryBiopsy, MetastaticDisease,
-#    Outcomes, last_date, FamilyHistory,
-#    ClinicalMolLinkage, CH_status)
-```
-
-```{r load rds}
-# write_rds(data, "Rmd/R01 Gillis-Teng 2023-2024/cleaned_all_tumor_type_data_05122025.rds")
-# data <- read_rds(paste0(here::here(), "/Rmd/R01 Gillis-Teng 2023-2024/cleaned_all_tumor_type_data_05122025.rds"))
-```
-
-
-```{r Create new variables}
+# IV. Create new variables----
 data <- data %>% 
   # Age at last contact
   mutate(is_agelastcontact_last_date = case_when(
@@ -865,52 +781,52 @@ data <- data %>%
   # Age at first treatment
   mutate(first_treatment = case_when(
     (AgeAtRadiationStart < AgeAtSurgeryBiopsy |
-      (is.na(AgeAtSurgeryBiopsy) &
-         !is.na(AgeAtRadiationStart))) &
+       (is.na(AgeAtSurgeryBiopsy) &
+          !is.na(AgeAtRadiationStart))) &
       
       (AgeAtRadiationStart < AgeAtMedStart_1 |
-    (is.na(AgeAtMedStart_1) &
-         !is.na(AgeAtRadiationStart))) &
+         (is.na(AgeAtMedStart_1) &
+            !is.na(AgeAtRadiationStart))) &
       
       (AgeAtRadiationStart < AgeAtTransplant | 
          (is.na(AgeAtTransplant) &
-         !is.na(AgeAtRadiationStart)))              ~ "Radiation",
+            !is.na(AgeAtRadiationStart)))              ~ "Radiation",
     
     (AgeAtSurgeryBiopsy < AgeAtRadiationStart | 
-         (is.na(AgeAtRadiationStart) &
-         !is.na(AgeAtSurgeryBiopsy))) &
+       (is.na(AgeAtRadiationStart) &
+          !is.na(AgeAtSurgeryBiopsy))) &
       
       (AgeAtSurgeryBiopsy < AgeAtMedStart_1 |
-    (is.na(AgeAtMedStart_1) &
-         !is.na(AgeAtSurgeryBiopsy))) &
+         (is.na(AgeAtMedStart_1) &
+            !is.na(AgeAtSurgeryBiopsy))) &
       
       (AgeAtSurgeryBiopsy < AgeAtTransplant | 
          (is.na(AgeAtTransplant) &
-         !is.na(AgeAtSurgeryBiopsy)))          ~ "Surgery",
+            !is.na(AgeAtSurgeryBiopsy)))          ~ "Surgery",
     
     (AgeAtMedStart_1 < AgeAtRadiationStart | 
-         (is.na(AgeAtRadiationStart) &
-         !is.na(AgeAtMedStart_1))) &
+       (is.na(AgeAtRadiationStart) &
+          !is.na(AgeAtMedStart_1))) &
       
       (AgeAtMedStart_1 < AgeAtSurgeryBiopsy |
-      (is.na(AgeAtSurgeryBiopsy) &
-         !is.na(AgeAtMedStart_1))) &
+         (is.na(AgeAtSurgeryBiopsy) &
+            !is.na(AgeAtMedStart_1))) &
       
       (AgeAtMedStart_1 < AgeAtTransplant | 
          (is.na(AgeAtTransplant) &
-         !is.na(AgeAtMedStart_1)))             ~ "Drugs",
+            !is.na(AgeAtMedStart_1)))             ~ "Drugs",
     
     (AgeAtTransplant < AgeAtRadiationStart | 
-         (is.na(AgeAtRadiationStart) &
-         !is.na(AgeAtTransplant))) &
+       (is.na(AgeAtRadiationStart) &
+          !is.na(AgeAtTransplant))) &
       
       (AgeAtTransplant < AgeAtSurgeryBiopsy |
-      (is.na(AgeAtSurgeryBiopsy) &
-         !is.na(AgeAtTransplant))) &
+         (is.na(AgeAtSurgeryBiopsy) &
+            !is.na(AgeAtTransplant))) &
       
       (AgeAtTransplant < AgeAtMedStart_1 |
-    (is.na(AgeAtMedStart_1) &
-         !is.na(AgeAtTransplant)))             ~ "SCT"
+         (is.na(AgeAtMedStart_1) &
+            !is.na(AgeAtTransplant)))             ~ "SCT"
     
   )) %>% 
   mutate(age_at_first_treatment = case_when(
@@ -918,6 +834,10 @@ data <- data %>%
     first_treatment == "Surgery"                    ~ AgeAtSurgeryBiopsy,
     first_treatment == "Drugs"                      ~ AgeAtMedStart_1,
     first_treatment == "SCT"                        ~ AgeAtTransplant,
+  )) %>% 
+  mutate(received_imids = case_when(
+    received_imids == "Yes"                         ~ "Yes",
+    TRUE                                            ~ "No"
   )) %>% 
   # OS
   mutate(os_event = case_when(
@@ -934,361 +854,28 @@ data <- data %>%
     ProgRecurInd == "Progression"                   ~ 1,
     ProgRecurInd == "Recurrence"                    ~ 1
   )) %>% 
-  mutate(pfs_age = case_when(
-    ProgRecurInd == "No"                            ~ os_age,
-    ProgRecurInd == "Progression"                   ~ AgeAtProgRecur,
-    ProgRecurInd == "Recurrence"                    ~ AgeAtProgRecur
-    )) %>% 
+  mutate(pfs_age = coalesce(AgeAtProgRecur, AgeAtLastContact)) %>% 
   mutate(pfs_time_from_dx_years = pfs_age - AgeAtDiagnosis) %>% 
   mutate(pfs_time_from_treatment_years = pfs_age - age_at_first_treatment) %>% 
   # Metastasis
-  mutate(met_event = case_when(
+  mutate(pfs_event = case_when(
     had_metastasis == "Yes"                         ~ 1,
     is.na(had_metastasis)                           ~ 0
-  ))# %>% 
-  # mutate(met_age = coalesce(AgeAtMetastaticSite, AgeAtLastContact)) %>% 
-  # mutate(met_time_from_dx_years = met_age - AgeAtDiagnosis) %>% 
-  # mutate(met_time_from_treatment_years = met_age - age_at_first_treatment)
-```
+  )) %>% 
+  mutate(met_age = coalesce(AgeAtMetastaticSite, AgeAtLastContact)) %>% 
+  mutate(met_time_from_dx_years = met_age - AgeAtDiagnosis) %>% 
+  mutate(met_time_from_treatment_years = met_age - age_at_first_treatment)
 
-
-```{r labeling}
-var_label(data) <- list(AgeAtDiagnosis = "Patient age at diagnosis?", germline_collection_age = "Age at blood collection",
-                        race_eth = "Race/Ethnicity", PrimaryDiagnosisSite = "Primary Site",
-                        ClinGroupStage = "Clinical Stage?", BodyWeight = "Body Weight",
-                        BodyHeight = "Body Height", bmi_cat = "BMI categories",
-                        SmokingStatus = "Smoking Status",
-                        first_treatment = "First Treatment Type",
-                        drugs_ever = "Drugs Ever", AgeAtMedStart_1 = "Age at First Drug",
-                        Medication_1 = "First Regimen",
-                        sct_ever = "Transplant Ever", AgeAtTransplant = "Age at Transplant",
-                        radiation_ever = "Radiation Ever", AgeAtRadiationStart = "Age at Radiation",
-                        surgery_ever = "Surgery Ever", AgeAtSurgeryBiopsy = "Age at Surgery",
-                        had_metastasis = "Metastasis?", AgeAtMetastaticSite = "Age at Metastasis"
-)
-```
-
-# Analysis
-```{r}
-data <- data %>% 
-  filter(!is.na(CH_status_using_BickWHO)) %>% 
-  mutate(CH_status_using_BickWHO = factor(CH_status_using_BickWHO, levels = c("No CH", "CH")))
-```
-
-## I. Lung
-```{r}
-lung_data <- data %>% 
-  filter(Disease.Type == "THO - Lung Cancer") %>% 
-  mutate(ClinGroupStage = case_when(
-    str_detect(ClinGroupStage, "0")        ~ "0",
-    str_detect(ClinGroupStage, "IV")       ~ "IV",
-    str_detect(ClinGroupStage, "III")      ~ "III",
-    str_detect(ClinGroupStage, "II")       ~ "II",
-    str_detect(ClinGroupStage, "I")        ~ "I"
-  ), ClinGroupStage = factor(ClinGroupStage, 
-                             levels = c("0", "I", "II", 
-                                        "III", "IV")))
-```
-
-### 1. Table 1. Patient characteristics by CH status
-```{r table 1 by CH}
-lung_data %>% 
-  select(CH_status, 
-         AgeAtDiagnosis, germline_collection_age,
-         Sex, Race, Ethnicity, race_eth,
-         ClinGroupStage,
-         ECOG, Karnofsky,
-         BodyWeight, BodyHeight, BMI, bmi_cat,
-         SmokingStatus) %>% 
-  tbl_summary(by = CH_status,
-              sort = list(everything() ~ "frequency")) %>% 
-  bold_labels() %>% add_overall() %>% 
-  add_p() %>% bold_p(t = 0.05) %>% 
-  add_stat_label() %>%
-  modify_header(list(label ~ "**Patient characteristics**", 
-                     all_stat_cols() ~ "**{level}**, N = {n}"))
-```
-
-### 2. Table 2. Treatments by CH status
-```{r treatment}
-lung_data %>% 
-  select(CH_status, 
-         first_treatment,
-         drugs_ever, AgeAtMedStart_1, Medication_1, 
-         sct_ever, AgeAtTransplant,
-         radiation_ever, AgeAtRadiationStart,
-         surgery_ever, AgeAtSurgeryBiopsy,
-         had_metastasis, AgeAtMetastaticSite) %>% 
-  tbl_summary(by = CH_status,
-              type = list(
-                c(drugs_ever, sct_ever, 
-                  radiation_ever, surgery_ever, 
-                  had_metastasis) ~ "categorical"
-              ),
-              sort = list(everything() ~ "frequency")) %>% 
-  bold_labels() %>% add_overall() %>% 
-  add_p() %>% bold_p(t = 0.05) %>%
-  add_stat_label() %>%
-  modify_header(list(label ~ "**Treatments**", 
-                     all_stat_cols() ~ "**{level}**, N = {n}"))
-```
-
-### 3. Table 3. Cytogenetics by CH status
-```{r cytogenetics}
-lung_data %>% 
-  select(CH_status,
-         "FISH t(4;14)" : "t(11;16)",
-         "CA 19-9" : "HPV 63"
-         ) %>% 
-  tbl_summary(by = CH_status,
-              sort = list(everything() ~ "frequency")) %>% 
-  bold_labels() %>% add_overall() %>% 
-  add_p() %>% bold_p(t = 0.05) %>%
-  add_stat_label() %>%
-  modify_header(list(label ~ "**Cytogenetics**", 
-                     all_stat_cols() ~ "**{level}**, N = {n}"))
-```
-
-### 4. Survival
-
-#### ii. OS
-```{r os}
-mysurv <- Surv(time = lung_data$os_time_from_dx_years, event = lung_data$os_event)
-myplot <- survfit(mysurv~CH_status, data = lung_data)
-
-ggsurvplot(myplot, data = lung_data,
-           title = "OS Analysis - from diagnosis",
-           font.main = c(20, "bold", "black"),
-           font.x = c(18, "bold", "black"),
-           font.y = c(18, "bold", "black"),
-           font.legend = c(16, "black"),
-           font.tickslab = c(16, "bold", "black"),
-           size = 1.5,
-
-           xlab = "Time in months",
-           legend = "top",
-           legend.title = "",
-           pval = TRUE,
-           conf.int = FALSE,
-           # Censor
-           censor = TRUE
-) + guides(colour = guide_legend(ncol = 1))
-
-tbl1 <- lung_data %>% select(os_event, os_time_from_dx_years,
-                        CH_status, germline_collection_age, 
-                        race_eth,
-                        drugs_ever, surgery_ever,
-                        ClinGroupStage, SmokingStatus) %>%
-  tbl_uvregression(method = survival::coxph,
-                   y = (Surv(time = lung_data$os_time_from_dx_years,
-                             event = lung_data$os_event)),
-                   exponentiate = TRUE) %>% 
-  bold_labels() %>% italicize_levels() %>% 
-  bold_p(t = .05) %>% add_nevent(location = "level") %>% add_n(location = "level")
-
-tbl2 <- coxph(Surv(time = lung_data$os_time_from_dx_years, 
-                   event = lung_data$os_event) ~ CH_status + germline_collection_age + 
-                        race_eth + ClinGroupStage + 
-                        drugs_ever + surgery_ever + SmokingStatus, # + radiation_ever + sct_ever + surgery_ever, 
-              data = lung_data)  %>% 
-  tbl_regression(exponentiate = TRUE) %>% 
-  bold_p(t = .05) %>% 
-  add_nevent(location = "level") %>% add_n(location = "level")
-tbl_merge(list(tbl1, tbl2), tab_spanner = c("**Univariable**", "**Multivariable**"))
-
-mysurv <- Surv(time = lung_data$os_time_from_treatment_years, event = lung_data$os_event)
-myplot <- survfit(mysurv~CH_status, data = lung_data)
-
-ggsurvplot(myplot, data = lung_data,
-           title = "OS Analysis - from first treatment",
-           font.main = c(20, "bold", "black"),
-           font.x = c(18, "bold", "black"),
-           font.y = c(18, "bold", "black"),
-           font.legend = c(16, "black"),
-           font.tickslab = c(16, "bold", "black"),
-           size = 1.5,
-
-           xlab = "Time in months",
-           legend = "top",
-           legend.title = "",
-           pval = TRUE,
-           conf.int = FALSE,
-           # Censor
-           censor = TRUE
-) + guides(colour = guide_legend(ncol = 1))
-
-tbl1 <- lung_data %>% select(os_event, os_time_from_treatment_years,
-                        CH_status, germline_collection_age, 
-                        race_eth,
-                        drugs_ever, surgery_ever,
-                        ClinGroupStage, SmokingStatus) %>%
-  tbl_uvregression(method = survival::coxph,
-                   y = (Surv(time = lung_data$os_time_from_treatment_years,
-                             event = lung_data$os_event)),
-                   exponentiate = TRUE) %>% 
-  bold_labels() %>% italicize_levels() %>% 
-  bold_p(t = .05) %>% add_nevent(location = "level") %>% add_n(location = "level")
-
-tbl2 <- coxph(Surv(time = lung_data$os_time_from_treatment_years, 
-                   event = lung_data$os_event) ~ CH_status + germline_collection_age + 
-                        race_eth + ClinGroupStage + 
-                        drugs_ever + surgery_ever + SmokingStatus, # + radiation_ever + sct_ever + , 
-              data = lung_data)  %>% 
-  tbl_regression(exponentiate = TRUE) %>% 
-  bold_p(t = .05) %>% 
-  add_nevent(location = "level") %>% add_n(location = "level")
-tbl_merge(list(tbl1, tbl2), tab_spanner = c("**Univariable**", "**Multivariable**"))
-```
-
-#### ii. PFS
-```{r pfs}
-mysurv <- Surv(time = lung_data$pfs_time_from_dx_years, event = lung_data$pfs_event)
-myplot <- survfit(mysurv~CH_status, data = lung_data)
-
-ggsurvplot(myplot, data = lung_data,
-           title = "PFS Analysis - from diagnosis",
-           font.main = c(20, "bold", "black"),
-           font.x = c(18, "bold", "black"),
-           font.y = c(18, "bold", "black"),
-           font.legend = c(16, "black"),
-           font.tickslab = c(16, "bold", "black"),
-           size = 1.5,
-
-           xlab = "Time in months",
-           legend = "top",
-           legend.title = "",
-           pval = TRUE,
-           conf.int = FALSE,
-           # Censor
-           censor = TRUE
-) + guides(colour = guide_legend(ncol = 1))
-
-tbl1 <- lung_data %>% select(pfs_event, pfs_time_from_dx_years,
-                        CH_status, germline_collection_age, 
-                        race_eth,
-                        drugs_ever, surgery_ever,
-                        ClinGroupStage, SmokingStatus) %>%
-  tbl_uvregression(method = survival::coxph,
-                   y = (Surv(time = lung_data$pfs_time_from_dx_years,
-                             event = lung_data$pfs_event)),
-                   exponentiate = TRUE) %>% 
-  bold_labels() %>% italicize_levels() %>% 
-  bold_p(t = .05) %>% add_nevent(location = "level") %>% add_n(location = "level")
-
-tbl2 <- coxph(Surv(time = lung_data$pfs_time_from_dx_years, 
-                   event = lung_data$pfs_event) ~ CH_status + germline_collection_age + 
-                        race_eth + ClinGroupStage + 
-                        drugs_ever + surgery_ever + SmokingStatus,# + radiation_ever + sct_ever + , 
-              data = lung_data)  %>% 
-  tbl_regression(exponentiate = TRUE) %>% 
-  bold_p(t = .05) %>% 
-  add_nevent(location = "level") %>% add_n(location = "level")
-tbl_merge(list(tbl1, tbl2), tab_spanner = c("**Univariable**", "**Multivariable**"))
-
-
-mysurv <- Surv(time = lung_data$pfs_time_from_treatment_years, event = lung_data$pfs_event)
-myplot <- survfit(mysurv~CH_status, data = lung_data)
-
-ggsurvplot(myplot, data = lung_data,
-           title = "PFS Analysis - from first treatment",
-           font.main = c(20, "bold", "black"),
-           font.x = c(18, "bold", "black"),
-           font.y = c(18, "bold", "black"),
-           font.legend = c(16, "black"),
-           font.tickslab = c(16, "bold", "black"),
-           size = 1.5,
-
-           xlab = "Time in months",
-           legend = "top",
-           legend.title = "",
-           pval = TRUE,
-           conf.int = FALSE,
-           # Censor
-           censor = TRUE
-) + guides(colour = guide_legend(ncol = 1))
-
-tbl1 <- lung_data %>% select(pfs_event, pfs_time_from_treatment_years,
-                        CH_status, germline_collection_age, 
-                        race_eth,
-                        drugs_ever, surgery_ever,
-                        ClinGroupStage, SmokingStatus) %>%
-  tbl_uvregression(method = survival::coxph,
-                   y = (Surv(time = lung_data$pfs_time_from_treatment_years,
-                             event = lung_data$pfs_event)),
-                   exponentiate = TRUE) %>% 
-  bold_labels() %>% italicize_levels() %>% 
-  bold_p(t = .05) %>% add_nevent(location = "level") %>% add_n(location = "level")
-
-tbl2 <- coxph(Surv(time = lung_data$pfs_time_from_treatment_years, 
-                   event = lung_data$pfs_event) ~ CH_status + germline_collection_age + 
-                        race_eth + ClinGroupStage + 
-                        drugs_ever + surgery_ever + SmokingStatus,# + radiation_ever + sct_ever + , 
-              data = lung_data)  %>% 
-  tbl_regression(exponentiate = TRUE) %>% 
-  bold_p(t = .05) %>% 
-  add_nevent(location = "level") %>% add_n(location = "level")
-tbl_merge(list(tbl1, tbl2), tab_spanner = c("**Univariable**", "**Multivariable**"))
-```
-
-## II. Breast
-```{r}
-breast_data <- data %>% 
-  arrange(AvatarKey) %>% 
-  filter(Disease.Type == "BRE - Breast Cancer") %>% 
-  mutate(ClinGroupStage = case_when(
-    str_detect(ClinGroupStage, "0")        ~ "0",
-    str_detect(ClinGroupStage, "IV")       ~ "IV",
-    str_detect(ClinGroupStage, "III")      ~ "III",
-    str_detect(ClinGroupStage, "II")       ~ "II",
-    str_detect(ClinGroupStage, "I")        ~ "I"
-  ), ClinGroupStage = factor(ClinGroupStage, 
-                             levels = c("0", "I", "II", 
-                                        "III", "IV")))
-```
-
-## III. Colorectal
-```{r}
-crc_data <- data %>% 
-  arrange(AvatarKey) %>% 
-  filter(Disease.Type == "GI - Colorectal Cancer") %>% 
-  mutate(ClinGroupStage = case_when(
-    str_detect(ClinGroupStage, "0")        ~ "0",
-    str_detect(ClinGroupStage, "IV")       ~ "IV",
-    str_detect(ClinGroupStage, "III")      ~ "III",
-    str_detect(ClinGroupStage, "II")       ~ "II",
-    str_detect(ClinGroupStage, "I")        ~ "I"
-  ), ClinGroupStage = factor(ClinGroupStage, 
-                             levels = c("0", "I", "II", 
-                                        "III", "IV")))
-```
-
-## IV. Multiple Myeloma
-```{r}
-mm_data <- data %>% 
-  filter(Disease.Type == "HEM - Myeloma Spectrum") %>% 
-  mutate(iss_stage = case_when(
-    str_detect(iss_stage, "III")      ~ "III",
-    str_detect(iss_stage, "II")       ~ "II",
-    str_detect(iss_stage, "I")        ~ "I"
-  ), iss_stage = factor(iss_stage, 
-                             levels = c("I", "II", 
-                                        "III")))
-```
-
-## V. Prostate
-```{r}
-prostate_data <- data %>% 
-  arrange(AvatarKey) %>% 
-  filter(Disease.Type == "GU - Prostate Cancer") %>% 
-  mutate(ClinGroupStage = case_when(
-    str_detect(ClinGroupStage, "0")        ~ "0",
-    str_detect(ClinGroupStage, "IV")       ~ "IV",
-    str_detect(ClinGroupStage, "III")      ~ "III",
-    str_detect(ClinGroupStage, "II")       ~ "II",
-    str_detect(ClinGroupStage, "I")        ~ "I"
-  ), ClinGroupStage = factor(ClinGroupStage, 
-                             levels = c("0", "I", "II", 
-                                        "III", "IV")))
-```
-
-
+# V. Save----
+write_csv(data %>% select(AvatarKey, 
+                          Sex, Race, Ethnicity, race_eth, 
+                          drugs_ever, received_imids,
+                          surgery_ever,
+                          iss_stage, ClinGroupStage,
+                          SmokingStatus,
+                          os_event, os_time_from_dx_years,
+                          os_time_from_treatment_years,
+                          pfs_event, pfs_time_from_dx_years,
+                          pfs_time_from_treatment_years,
+                          is_patient_MM), 
+          paste0("MM_data_", today() ,".csv"))
