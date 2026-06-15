@@ -51,7 +51,58 @@ ClinicalMolLinkage <- read_csv(paste0(
   "/23PRJ127MCC_ClinicalData_20230824",
   "/23PRJ127MCC_20230620_ClinicalMolLinkage_V4.csv"))
 
+drug_class <- 
+  read.csv(paste0(here::here(), 
+                  "/data/processed_data",
+                  "/CHinOvary_Updated_BoltonChemoDosing_20260127.csv"))
+
+
 ################################################################################# II ### Treatment data cleaning
+# We reviewed the drugs name that patients receive after the first data wrangling
+# Here is a script to add new drugs names into the Bolton categories
+# drug_class <- drug_class %>%
+#   mutate(drug_name = case_when(
+#     drug_name == "arsenic_trioxide"         ~ "arsenic trioxide",
+#     TRUE                                    ~ drug_name
+#   )) %>% 
+#   add_row(drug_name = "acalabrutinib", narrow_drug_class_cytotoxic_only = "targeted_therapy", general_drug_class = "targeted_therapy") %>%
+#   add_row(drug_name = "ado-trastuzumab emtansine", narrow_drug_class_cytotoxic_only = "targeted_therapy", general_drug_class = "targeted_therapy") %>%
+#   add_row(drug_name = "bacillus calmette-guerin", narrow_drug_class_cytotoxic_only = "immune_therapy", general_drug_class = "immune_therapy") %>%
+#   add_row(drug_name = "capmatinib", narrow_drug_class_cytotoxic_only = "targeted_therapy", general_drug_class = "targeted_therapy") %>%
+#   add_row(drug_name = "ixazomib", narrow_drug_class_cytotoxic_only = "biologic_therapy", general_drug_class = "biologic_therapy") %>%
+#   add_row(drug_name = "pomalidomide", narrow_drug_class_cytotoxic_only = "cytotoxic_therapy_other", general_drug_class = "cytotoxic_therapy") %>%
+#   add_row(drug_name = "ribociclib", narrow_drug_class_cytotoxic_only = "targeted_therapy", general_drug_class = "targeted_therapy") %>%
+#   add_row(drug_name = "selpercatinib", narrow_drug_class_cytotoxic_only = "targeted_therapy", general_drug_class = "targeted_therapy") %>%
+#   add_row(drug_name = "sotorasib", narrow_drug_class_cytotoxic_only = "targeted_therapy", general_drug_class = "targeted_therapy")
+# write_csv(drug_class,
+#           paste0(here::here(),
+#                  "/data/processed_data",
+#                  "/CHinORIEN_Updated_BoltonChemoDosing_20260615.csv"))
+# write_csv(drug_class,
+#           paste0(path_raw,
+#                  "/ProcessedData",
+#                  "/CHinORIEN_Updated_BoltonChemoDosing_20260615.csv"))
+
+# not_cancer_drug <- tibble(drug_name = c("apremilast", "filgrastim", "hydrocortisone",
+#                      "levothyroxine", "liothyronine sodium", "minocycline",
+#                      "pegfilgrastim", "porfimer sodium", "tacrolimus", 
+#                      "tretinoin", "zoledronic acid"),
+#        drug_type = "Not a cancer drug")
+# write_csv(not_cancer_drug,
+#           paste0(here::here(),
+#                  "/data/processed_data",
+#                  "/CHinORIEN_NotCancerDrugRemovedFromData_20260615.csv"))
+# write_csv(not_cancer_drug,
+#           paste0(path_raw,
+#                  "/ProcessedData",
+#                  "/CHinORIEN_NotCancerDrugRemovedFromData_20260615.csv"))
+
+
+
+
+
+
+
 ClinicalMolLinkage <- ClinicalMolLinkage %>% 
   select(ORIENAvatarKey, WES, RNASeq, Age.At.Specimen.Collection)
 
@@ -95,13 +146,23 @@ Medications1 <- Medications %>%
       Medication == "Bevacizumab-maly"            ~ "Bevacizumab",
       TRUE                                        ~ Medication
     )) %>% 
-  mutate(Medication = str_to_lower(Medication))
+  mutate(Medication = str_to_lower(Medication)) %>% 
+  left_join(., drug_class, by = c("Medication" = "drug_name")) %>% 
+  # Remove drugs that are not cancer drugs
+  filter(Medication)
+  here
+  
+  # and code an overall chemotherapy variable
+  mutate(is_chemotherapy = case_when(
+    !is.na(narrow_drug_class_cytotoxic_only)        ~ "Yes",
+    Medication == "chemo, nos"                      ~ "Yes"
+  ), .after = MedicationInd)
 
 # Separate patient who didn't receive drugs
 Medications_never <- Medications1 %>% 
-  filter(MedicationInd == "No") #%>% 
-  # mutate(has_first_line = "Never received any drug", .after = MedicationInd) %>% 
-  # mutate(is_chemotherapy =  "Never received any drug", .after = MedicationInd)
+  filter(MedicationInd == "No") %>% 
+  mutate(has_first_line = "Never received any drug", .after = MedicationInd) %>%
+  mutate(is_chemotherapy =  "Never received any drug", .after = MedicationInd)
   
 Medications_yes <- Medications1 %>% 
   # Fix age for a couple of patients
@@ -110,10 +171,30 @@ Medications_yes <- Medications1 %>%
   mutate(ever_first_med_age = min(AgeAtMedStart, na.rm = TRUE),
          ever_first_med_age = na_if(ever_first_med_age, Inf)) %>% 
   ungroup() %>% 
-  # Recode line with numbers to be able to sort and make dense rank
+  # recode line
+  # There are regimen line are unknown 
+  # but some have the same age as other row for which the line is known, use to fill it up
+  mutate(MedLineRegimen = case_when( # m
+  MedLineRegimen %in% c("Unknown/Not Applicable",
+                        "Unknown/Not Reported")    ~ NA_character_,
+  TRUE                                             ~ MedLineRegimen
+)) %>%
+  group_by(AvatarKey, AgeAtMedStart) %>% 
+  fill(MedLineRegimen, .direction = "updown") %>% 
+  ungroup() %>% 
+  # Do the reverse
+  group_by(AvatarKey, MedLineRegimen) %>% 
+  fill(AgeAtMedStart, .direction = "updown") %>% 
+  ungroup() %>% 
+  # Organize vars
+  select(-c(MedReasonNoneGiven : MedPrimaryDiagnosisSite), 
+         everything(), MedReasonNoneGiven : MedPrimaryDiagnosisSite) %>% 
+  distinct() %>% 
+  # Filter patients who recived drugs
   filter(MedicationInd == "Yes") %>% 
+  # Recode line with numbers to be able to sort and make dense rank
   mutate(regimen_line = case_when(
-    str_detect(MedLineRegimen, "Unknown")            ~ 999,
+    is.na(MedLineRegimen)                            ~ 999,
     str_detect(MedLineRegimen, "First") &
       str_detect(MedLineRegimen, "Neoadjuvant")      ~ -1,
     str_detect(MedLineRegimen, "First") &
@@ -161,22 +242,37 @@ Medications_yes <- Medications1 %>%
 
 Medications_final <- bind_rows(Medications_yes, Medications_never) %>% 
   distinct(AvatarKey, AgeAtMedStart, Medication, AgeAtMedStop, .keep_all = TRUE) %>% 
+  mutate(received_chemotherapy = case_when(
+    is_chemotherapy == "Yes"               ~ "Ever"
+  )) %>% 
   group_by(AvatarKey) %>% 
+  fill(received_chemotherapy, .direction = "updown") %>% 
   mutate(year_first_medication = first(YearOfMedStart), .after = YearOfMedStart) %>% 
+  group_by(AvatarKey, is_chemotherapy) %>% 
+  mutate(first_chemo_age = case_when(
+    is_chemotherapy == "Yes"            ~ first(AgeAtMedStart)
+  ), .after = is_chemotherapy) %>% 
+  ungroup() %>% 
+  group_by(AvatarKey) %>% 
+  fill(first_chemo_age, .direction = "updown") %>% 
   ungroup()
 
 # Create regimen - keep as "long" data
 Medications_regimen <- Medications_final %>%
   # Same age start and stop
-  group_by(AvatarKey, regimen_line, AgeAtMedStart, MedicationInd, AgeAtMedStop, 
-           ever_first_med_age, year_first_medication
-  ) %>%
-  summarise_at(vars(Medication), str_c, collapse = "; ") %>%
-  # same age start
-  group_by(AvatarKey, regimen_line, AgeAtMedStart, MedicationInd, 
+  group_by(AvatarKey, regimen_line, first_chemo_age, AgeAtMedStart, MedicationInd, AgeAtMedStop, 
            ever_first_med_age, year_first_medication
   ) %>%
   summarise_at(vars(Medication, 
+                    narrow_drug_class_cytotoxic_only, 
+                    general_drug_class), str_c, collapse = "; ") %>%
+  # same age start
+  group_by(AvatarKey, regimen_line, first_chemo_age, AgeAtMedStart, MedicationInd, 
+           ever_first_med_age, year_first_medication
+  ) %>%
+  summarise_at(vars(Medication, 
+                    narrow_drug_class_cytotoxic_only, 
+                    general_drug_class,
                     AgeAtMedStop), str_c, collapse = "; ") %>%
   # # remove regimen line - not right if NAs
   # group_by(AvatarKey, AgeAtMedStart, MedicationInd, 

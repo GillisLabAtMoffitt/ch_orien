@@ -813,8 +813,20 @@ rm(Tumor_wes, Germline_wes)
 <!-- 19601 patients -->
 
 ```{r Merge data}
+new_ch_status_lung <-
+  read.delim(paste0(path_dir, 
+                    "/ProcessedData/SampleList",
+                    "/AddedLung_sample_with_Avatar.txt")) %>% 
+  select(AvatarKey = ORIENAvatarKey, 
+         Germline_WES = Germline,
+         Tumor_WES, RNASeq) %>% 
+  mutate(cancer_type = "added_Lung")
+
+
+
 data <- CH_status %>%
   rename(AvatarKey = ORIENAvatarKey) %>% 
+  bind_rows(., new_ch_status_lung) %>% 
   full_join(., demographics, by = "AvatarKey") %>%
   full_join(., PatientHistory %>%
               select(AvatarKey, SmokingStatus),
@@ -979,6 +991,19 @@ data <- data %>%
 ```{r}
 lung_data <- data %>% 
   filter(Disease.Type == "THO - Lung Cancer") %>% 
+  mutate(ClinGroupStage = case_when(
+    str_detect(ClinGroupStage, "0")        ~ "0",
+    str_detect(ClinGroupStage, "IV")       ~ "IV",
+    str_detect(ClinGroupStage, "III")      ~ "III",
+    str_detect(ClinGroupStage, "II")       ~ "II",
+    str_detect(ClinGroupStage, "I")        ~ "I"
+  ), ClinGroupStage = factor(ClinGroupStage, 
+                             levels = c("0", "I", "II", 
+                                        "III", "IV")))
+
+new_lung_data <- data %>% 
+  # filter(Disease.Type == "THO - Lung Cancer") %>% 
+  filter(cancer_type == "added_Lung") %>% 
   mutate(ClinGroupStage = case_when(
     str_detect(ClinGroupStage, "0")        ~ "0",
     str_detect(ClinGroupStage, "IV")       ~ "IV",
