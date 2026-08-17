@@ -240,7 +240,7 @@ Diagnosis %>%
 Diagnosis <- Diagnosis %>%
   select(AvatarKey, AgeAtDiagnosis, YearOfDiagnosis,
          PrimaryDiagnosisSiteCode : Histology,
-         ClinGroupStage,
+         ClinGroupStage, PathGroupStage,
          CurrentlySeenForPrimaryOrRecurr,
          PerformStatusAtDiagnosis, 
          OtherStagingSystem, OtherStagingValue) %>%
@@ -251,9 +251,28 @@ Diagnosis <- Diagnosis %>%
   ))) %>%
   mutate(ECOG = str_match(PerformStatusAtDiagnosis, "ECOG ([:digit:])")[,2]) %>%
   mutate(Karnofsky = str_match(PerformStatusAtDiagnosis, "Karnofsky ([:digit:].*)%")[,2]) %>%
+  # Stage
+  mutate(ClinGroupStage = case_when(
+    str_detect(ClinGroupStage, "IV")                        ~ "4",
+    str_detect(ClinGroupStage, "III")                       ~ "3",
+    str_detect(ClinGroupStage, "II")                        ~ "2",
+    str_detect(ClinGroupStage, "I")                         ~ "1",
+    str_detect(ClinGroupStage, "0")                         ~ "0"
+  )) %>% 
+  mutate(PathGroupStage = case_when(
+    str_detect(PathGroupStage, "IV")                        ~ "4",
+    str_detect(PathGroupStage, "III")                       ~ "3",
+    str_detect(PathGroupStage, "II")                        ~ "2",
+    str_detect(PathGroupStage, "I")                         ~ "1",
+    str_detect(PathGroupStage, "0")                         ~ "0"
+  )) %>% 
+  group_by(AvatarKey) %>% 
+  mutate(stage = max(ClinGroupStage, PathGroupStage, na.rm = TRUE)) %>%
+  ungroup() %>% #select(AvatarKey, ClinGroupStage, PathGroupStage, stage)
   mutate(iss_stage = case_when(
     OtherStagingSystem == "ISS"           ~ OtherStagingValue
   )) %>% 
+  
   arrange(AvatarKey, AgeAtDiagnosis) %>%
   group_by(AvatarKey) %>%
   mutate(diagnosis_sequence = row_number(AvatarKey), .after = AvatarKey) %>%
@@ -967,7 +986,7 @@ data <- data %>%
 ```{r labeling}
 var_label(data) <- list(AgeAtDiagnosis = "Patient age at diagnosis?", germline_collection_age = "Age at blood collection",
                         race_eth = "Race/Ethnicity", PrimaryDiagnosisSite = "Primary Site",
-                        ClinGroupStage = "Clinical Stage?", BodyWeight = "Body Weight",
+                        stage = "Stage", BodyWeight = "Body Weight",
                         BodyHeight = "Body Height", bmi_cat = "BMI categories",
                         SmokingStatus = "Smoking Status",
                         first_treatment = "First Treatment Type",
@@ -991,28 +1010,28 @@ data <- data %>%
 ```{r}
 lung_data <- data %>% 
   filter(Disease.Type == "THO - Lung Cancer") %>% 
-  mutate(ClinGroupStage = case_when(
-    str_detect(ClinGroupStage, "0")        ~ "0",
-    str_detect(ClinGroupStage, "IV")       ~ "IV",
-    str_detect(ClinGroupStage, "III")      ~ "III",
-    str_detect(ClinGroupStage, "II")       ~ "II",
-    str_detect(ClinGroupStage, "I")        ~ "I"
-  ), ClinGroupStage = factor(ClinGroupStage, 
-                             levels = c("0", "I", "II", 
-                                        "III", "IV")))
+  mutate(stage = case_when(
+    stage ==  0        ~ "0",
+    stage ==  1        ~ "I",
+    stage ==  2       ~ "II",
+    stage ==  3      ~ "III",
+    stage ==  4       ~ "IV"
+  ), stage = factor(stage, 
+                    levels = c("0", "I", "II", 
+                               "III", "IV")))
 
 new_lung_data <- data %>% 
   # filter(Disease.Type == "THO - Lung Cancer") %>% 
   filter(cancer_type == "added_Lung") %>% 
-  mutate(ClinGroupStage = case_when(
-    str_detect(ClinGroupStage, "0")        ~ "0",
-    str_detect(ClinGroupStage, "IV")       ~ "IV",
-    str_detect(ClinGroupStage, "III")      ~ "III",
-    str_detect(ClinGroupStage, "II")       ~ "II",
-    str_detect(ClinGroupStage, "I")        ~ "I"
-  ), ClinGroupStage = factor(ClinGroupStage, 
-                             levels = c("0", "I", "II", 
-                                        "III", "IV")))
+  mutate(stage = case_when(
+    stage ==  0        ~ "0",
+    stage ==  1        ~ "I",
+    stage ==  2       ~ "II",
+    stage ==  3      ~ "III",
+    stage ==  4       ~ "IV"
+  ), stage = factor(stage, 
+                    levels = c("0", "I", "II", 
+                               "III", "IV")))
 ```
 
 ### 1. Table 1. Patient characteristics by CH status
@@ -1260,13 +1279,13 @@ tbl_merge(list(tbl1, tbl2), tab_spanner = c("**Univariable**", "**Multivariable*
 breast_data <- data %>% 
   arrange(AvatarKey) %>% 
   filter(Disease.Type == "BRE - Breast Cancer") %>% 
-  mutate(ClinGroupStage = case_when(
-    str_detect(ClinGroupStage, "0")        ~ "0",
-    str_detect(ClinGroupStage, "IV")       ~ "IV",
-    str_detect(ClinGroupStage, "III")      ~ "III",
-    str_detect(ClinGroupStage, "II")       ~ "II",
-    str_detect(ClinGroupStage, "I")        ~ "I"
-  ), ClinGroupStage = factor(ClinGroupStage, 
+  mutate(stage = case_when(
+    stage ==  0        ~ "0",
+    stage ==  1        ~ "I",
+    stage ==  2       ~ "II",
+    stage ==  3      ~ "III",
+    stage ==  4       ~ "IV"
+  ), stage = factor(stage, 
                              levels = c("0", "I", "II", 
                                         "III", "IV")))
 ```
@@ -1276,13 +1295,13 @@ breast_data <- data %>%
 crc_data <- data %>% 
   arrange(AvatarKey) %>% 
   filter(Disease.Type == "GI - Colorectal Cancer") %>% 
-  mutate(ClinGroupStage = case_when(
-    str_detect(ClinGroupStage, "0")        ~ "0",
-    str_detect(ClinGroupStage, "IV")       ~ "IV",
-    str_detect(ClinGroupStage, "III")      ~ "III",
-    str_detect(ClinGroupStage, "II")       ~ "II",
-    str_detect(ClinGroupStage, "I")        ~ "I"
-  ), ClinGroupStage = factor(ClinGroupStage, 
+  mutate(stage = case_when(
+    stage ==  0        ~ "0",
+    stage ==  1        ~ "I",
+    stage ==  2       ~ "II",
+    stage ==  3      ~ "III",
+    stage ==  4       ~ "IV"
+  ), stage = factor(stage, 
                              levels = c("0", "I", "II", 
                                         "III", "IV")))
 ```
@@ -1305,13 +1324,13 @@ mm_data <- data %>%
 prostate_data <- data %>% 
   arrange(AvatarKey) %>% 
   filter(Disease.Type == "GU - Prostate Cancer") %>% 
-  mutate(ClinGroupStage = case_when(
-    str_detect(ClinGroupStage, "0")        ~ "0",
-    str_detect(ClinGroupStage, "IV")       ~ "IV",
-    str_detect(ClinGroupStage, "III")      ~ "III",
-    str_detect(ClinGroupStage, "II")       ~ "II",
-    str_detect(ClinGroupStage, "I")        ~ "I"
-  ), ClinGroupStage = factor(ClinGroupStage, 
+  mutate(stage = case_when(
+    stage ==  0        ~ "0",
+    stage ==  1        ~ "I",
+    stage ==  2       ~ "II",
+    stage ==  3      ~ "III",
+    stage ==  4       ~ "IV"
+  ), stage = factor(stage, 
                              levels = c("0", "I", "II", 
                                         "III", "IV")))
 ```
