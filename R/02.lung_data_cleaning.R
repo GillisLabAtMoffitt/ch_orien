@@ -12,8 +12,10 @@ path_raw <- fs::path("", "Volumes", "Gillis_Research",
                      "Lab_Data", "CHinORIEN")
 
 lung_patients <- 
-  read.delim(paste0(path_raw,
-                    "/ProcessedData/SampleList/AllLung_Samplelist_wRNA.txt"))
+  read.delim(paste0(path_raw, 
+                    "/ProcessedData",
+                    "/CHinORIEN_Lung/SampleList",
+                    "/AllLung_Samplelist_wRNA.txt"))
 
 # ClinicalMolLinkage file in Normalized folder doesn't have WESid
 # Use the file from first folder
@@ -22,21 +24,25 @@ ClinicalMolLinkage <- read_csv(paste0(
   "/RawData",
   "/23PRJ127MCC_ClinicalData_20230824",
   "/23PRJ127MCC_20230620_ClinicalMolLinkage_V4.csv"))
+ClinicalMolLinkage <- read_csv(paste0(
+  here::here(),
+  "/data/raw_data",
+  "/ClinicalMolLinkage_V4.csv"))
 
 parent_dir_path <- dirname(path_raw)
 drug_class <- 
-  read.csv(paste0(#here::here(), 
-    # "/data/processed_data",
-    parent_dir_path,
-    "/SharedResources/BoltonDrugCategories",
-    "/CHevolution_Updated_BoltonChemoDosing_20260713.csv"))
+  read.csv(paste0(dirname(here::here()), "/chemo_drug_class",
+                  "/data/BoltonDrugCategories",
+                  # parent_dir_path,
+                  # "/SharedResources/BoltonDrugCategories",
+                  "/CHevolution_Updated_BoltonChemoDosing_20260713.csv"))
 
 removed_drug <- 
-  read.csv(paste0(#here::here(), 
-    # "/data/processed_data",
-    parent_dir_path,
-    "/SharedResources/NotCancerDrugs",
-    "/CHinOvary_NotCancerDrug_ToRemovedFromData_20260617.csv"))
+  read.csv(paste0(dirname(here::here()), "/chemo_drug_class",
+                  "/data/NotCancerDrugs",
+                  # parent_dir_path,
+                  # "/SharedResources/NotCancerDrugs",
+                  "/CHinOvary_NotCancerDrug_ToRemovedFromData_20260617.csv"))
 
 
 ################################################################################# II ### Data cleaning
@@ -194,7 +200,9 @@ Diagnosis <- Diagnosis %>%
   mutate(number_of_lung_dx = case_when(
     is_lung_dx == "Yes"          ~ n()
   ), .before = AgeAtDiagnosis) %>% 
-  ungroup() |> 
+  ungroup()
+
+Diagnosis_lung <- Diagnosis %>%
   filter(is_lung_dx == "Yes") |> 
   distinct(AvatarKey, .keep_all = TRUE) |> 
   select(AvatarKey, number_of_dx, diagnosis_sequence,
@@ -207,9 +215,40 @@ Diagnosis <- Diagnosis %>%
          CurrentlySeenForPrimaryOrRecurr,
          PerformStatusAtDiagnosis, 
          OtherStagingSystem, OtherStagingValue, everything(),
-         -c(is_lung_dx, AgeAtFirstContactFlag))
+         -c(is_lung_dx, AgeAtFirstContactFlag)) |> 
+  unite(lung_dx_id, c("AvatarKey", "diagnosis_sequence"), sep = "_", remove = FALSE)
 
-Diagnosis <- Diagnosis %>%
+pre_post_diagnosis <- Diagnosis %>%
+  unite(lung_dx_id, c("AvatarKey", "diagnosis_sequence"), sep = "_", remove = FALSE) %>%
+  # Merge by the lung dx id I created
+  full_join(., Diagnosis_lung |> 
+              select(lung_dx_id, diagnosis_sequence2 = diagnosis_sequence) |> 
+              mutate(is_actual_lung_dx = "Yes"),
+            by = "lung_dx_id") |> 
+  # create var for pre and post dx
+  group_by(AvatarKey) |> 
+  fill(diagnosis_sequence2, .direction = "updown") |> 
+  ungroup() |> 
+  mutate(pre_or_post = case_when(
+    diagnosis_sequence < diagnosis_sequence2           ~ "pre",
+    diagnosis_sequence > diagnosis_sequence2           ~ "post",
+  )) |> 
+  filter(pre_or_post == "pre" | pre_or_post == "post") |> 
+  select(AvatarKey, 
+         AgeAtDiagnosis, PrimaryDiagnosisSite, Histology, pre_or_post) |> 
+  unite(cancer_info_seperated_byslash, c("AgeAtDiagnosis" : "Histology"), sep = "; ", remove = TRUE) |> 
+  group_by(AvatarKey, pre_or_post) |> 
+  summarise_at(vars(cancer_info_seperated_byslash), str_c, collapse = " / ") |> 
+  ungroup() |> 
+  pivot_wider(id_cols = AvatarKey, 
+              names_from = "pre_or_post", 
+              values_from = cancer_info_seperated_byslash, 
+              names_glue = "{pre_or_post}_{.value}")
+
+Diagnosis <- Diagnosis_lung %>%
+  full_join(., pre_post_diagnosis,
+            by = "AvatarKey") |> 
+  select(-lung_dx_id) |> 
   mutate(ECOG = str_match(PerformStatusAtDiagnosis, "ECOG ([:digit:])")[,2], 
          .after = PerformStatusAtDiagnosis) %>%
   mutate(Karnofsky = str_match(PerformStatusAtDiagnosis, "Karnofsky ([:digit:].*)%")[,2], 
@@ -369,7 +408,133 @@ Medications_yes <- Medications1 %>%
   # select(-c(no_line_info, has_some_sort_line_info, regimen_line2))
   arrange(AvatarKey, regimen_line, AgeAtMedStart, Medication)
 
-Medications_final <- bind_rows(Medications_yes, Medications_never) %>% 
+Medications_yes <- 
+  Medications_yes %>% 
+  left_join(., Diagnosis %>%
+               select(AvatarKey, AgeAtDiagnosis, PrimaryDiagnosisSiteCode, PrimaryDiagnosisSite, number_of_dx, 
+                      diagnosis_sequence, pre_cancer_info_seperated_byslash,
+                      post_cancer_info_seperated_byslash),
+             by = c("AvatarKey"#, "MedPrimaryDiagnosisSiteCode" = "PrimaryDiagnosisSiteCode",
+                    # "MedPrimaryDiagnosisSite" = "PrimaryDiagnosisSite"
+             )) |> 
+  # select(AvatarKey, AgeAtMedStart, MedPrimaryDiagnosisSiteCode, MedPrimaryDiagnosisSite, 
+  #        AgeAtDiagnosis, number_of_dx, Medication,
+  #        diagnosis_sequence, pre_cancer_info_seperated_byslash,
+  #        post_cancer_info_seperated_byslash) |> 
+  mutate(filter_number_of_dx = number_of_dx, .after = number_of_dx) |> 
+  group_by(AvatarKey) |> 
+  fill(filter_number_of_dx, .direction = "updown") |> 
+  ungroup() |> 
+  mutate(isfor_lung_dx = case_when(
+    str_detect(MedPrimaryDiagnosisSite, "lung")    ~ "Yes",
+    str_detect(MedPrimaryDiagnosisSite, "Lung")    ~ "Yes",
+    str_detect(MedPrimaryDiagnosisSite, "Main bronchus")    ~ "Yes",
+    MedPrimaryDiagnosisSite == "Head of pancreas" &
+      !is.na(number_of_dx)                         ~ "Yes"
+  )) |> 
+  group_by(AvatarKey) %>% 
+  mutate(drug_sequence = row_number(AvatarKey), .after = AvatarKey) %>%
+  ungroup() %>% 
+  unite(drug_id, c("AvatarKey", "drug_sequence"), sep = "_", remove = FALSE)
+
+  
+  
+lung_medications <- Medications_yes |> 
+  filter(!is.na(isfor_lung_dx) |
+           (MedPrimaryDiagnosisSite == "Unknown/Not Applicable" & number_of_dx == 1) |
+           (MedPrimaryDiagnosisSite == "Unknown/Not Applicable" & filter_number_of_dx == 1)) |> 
+  group_by(AvatarKey) %>% 
+  mutate(first_lung_drug_age = min(AgeAtMedStart, na.rm = TRUE),
+         first_lung_drug_age = na_if(first_lung_drug_age, Inf)) %>% 
+  ungroup()
+
+not_lung <- Medications_yes |> 
+  filter(!str_detect(drug_id, paste0(lung_medications$drug_id, collapse = "$|^"))) %>% 
+  left_join(., lung_medications |> 
+              select(AvatarKey, first_lung_drug_age, drug_sequence2 = drug_sequence) |>
+              distinct(AvatarKey, .keep_all = TRUE),
+            by = "AvatarKey") |> 
+  # create var for pre and post dx
+  mutate(pre_age = str_match(pre_cancer_info_seperated_byslash, "(\\d+\\.\\d+); ")[,2],
+         pre_age = as.numeric(pre_age)) |> 
+  mutate(post_age = str_match(post_cancer_info_seperated_byslash, "(\\d+\\.\\d+); |(\\d+); ")[,2],
+         post_age = as.numeric(post_age)) |> 
+  mutate(post_age2 = str_match(post_cancer_info_seperated_byslash, "(\\d+); ")[,2],
+         post_age2 = as.numeric(post_age2)) |> 
+  mutate(post_age = coalesce(post_age, post_age2)) |> select(-post_age2) |> 
+  mutate(pre_or_post_note = case_when(
+    diagnosis_sequence == 1 &
+      AgeAtMedStart < post_age               ~ "lung",
+    diagnosis_sequence == 1 &
+      AgeAtMedStart >= post_age              ~ "post",
+
+    diagnosis_sequence != 1 &
+      AgeAtMedStart < AgeAtDiagnosis &
+      AgeAtMedStart >= pre_age               ~ "most likely pre",
+    diagnosis_sequence != 1 &
+      AgeAtMedStart >= AgeAtDiagnosis &
+      (AgeAtMedStart < post_age |
+         is.na(post_age))                    ~ "most likely lung",
+    diagnosis_sequence != 1 &
+      AgeAtMedStart > AgeAtDiagnosis &
+      AgeAtMedStart >= post_age              ~ "most likely post",
+    diagnosis_sequence != 1 &
+      AgeAtMedStart < AgeAtDiagnosis         ~ "most likely pre"
+    # drug_sequence < drug_sequence2           ~ "pre",
+    # drug_sequence > drug_sequence2           ~ "post"
+  )) |> 
+  mutate(pre_or_post = case_when(
+    diagnosis_sequence == 1 &
+      AgeAtMedStart < post_age               ~ "lung",
+    diagnosis_sequence == 1 &
+      AgeAtMedStart >= post_age              ~ "post",
+    
+    diagnosis_sequence != 1 &
+      AgeAtMedStart < AgeAtDiagnosis &
+      AgeAtMedStart >= pre_age               ~ "pre",
+    diagnosis_sequence != 1 &
+      AgeAtMedStart >= AgeAtDiagnosis &
+      (AgeAtMedStart < post_age |
+         is.na(post_age))                    ~ "lung",
+    diagnosis_sequence != 1 &
+      AgeAtMedStart > AgeAtDiagnosis &
+      AgeAtMedStart >= post_age              ~ "post",
+    diagnosis_sequence != 1 &
+      AgeAtMedStart < AgeAtDiagnosis         ~ "pre"
+  )) |> 
+  # For 1 missing AgeAtMedStart
+  group_by(AvatarKey, MedPrimaryDiagnosisSite) |> 
+  fill(pre_or_post, pre_or_post_note, .direction = "updown") |> 
+  ungroup()
+
+more_lung_drug <- not_lung |> 
+  filter(pre_or_post == "lung")
+
+not_lung <- not_lung |> 
+  filter(pre_or_post == "pre" | pre_or_post == "post") |> 
+  select(AvatarKey, 
+         AgeAtMedStart, Medication, MedPrimaryDiagnosisSite, pre_or_post) |> 
+  unite(other_cancer_drug_seperated_byslash, c("AgeAtMedStart" : "MedPrimaryDiagnosisSite"), sep = "; ", remove = TRUE) |> 
+  group_by(AvatarKey, pre_or_post) |> 
+  summarise_at(vars(other_cancer_drug_seperated_byslash), str_c, collapse = " / ") |> 
+  ungroup() |> 
+  pivot_wider(id_cols = AvatarKey, 
+              names_from = "pre_or_post", 
+              values_from = other_cancer_drug_seperated_byslash, 
+              names_glue = "{pre_or_post}_{.value}")
+
+lung_medications <- lung_medications %>%
+  bind_rows(., more_lung_drug) %>%
+  full_join(., not_lung,
+            by = "AvatarKey") |> 
+  select(-c(drug_id, AgeAtDiagnosis, number_of_dx, filter_number_of_dx,
+            diagnosis_sequence, isfor_lung_dx,
+            pre_cancer_info_seperated_byslash,
+            post_cancer_info_seperated_byslash, first_lung_drug_age,
+            drug_sequence2, pre_age, post_age, pre_or_post_note, pre_or_post
+            ))
+
+Medications_final <- bind_rows(lung_medications, Medications_never) %>% 
   distinct(AvatarKey, AgeAtMedStart, Medication, AgeAtMedStop, .keep_all = TRUE) %>% 
   mutate(ever_received_chemotherapy = case_when(
     is_chemotherapy == "Yes"               ~ "Ever"
@@ -397,7 +562,8 @@ Medications_regimen <- Medications_final %>%
   group_by(AvatarKey, regimen_line, 
            AgeAtMedStart, MedicationInd, AgeAtMedStop, 
            ever_received_chemotherapy, first_chemo_age, year_first_chemo,
-           ever_first_med_age, year_first_medication
+           ever_first_med_age, year_first_medication, 
+           pre_other_cancer_drug_seperated_byslash, post_other_cancer_drug_seperated_byslash
   ) %>%
   summarise_at(vars(Medication, 
                     narrow_drug_class_cytotoxic_only, 
@@ -406,7 +572,8 @@ Medications_regimen <- Medications_final %>%
   group_by(AvatarKey, regimen_line, 
            AgeAtMedStart, MedicationInd, 
            ever_received_chemotherapy, first_chemo_age, year_first_chemo,
-           ever_first_med_age, year_first_medication
+           ever_first_med_age, year_first_medication, 
+           pre_other_cancer_drug_seperated_byslash, post_other_cancer_drug_seperated_byslash
   ) %>%
   summarise_at(vars(Medication, 
                     narrow_drug_class_cytotoxic_only, 
@@ -440,7 +607,8 @@ Medications_regimen <- Medications_final %>%
 Medications_wide <- dcast(setDT(Medications_regimen),
                           AvatarKey + MedicationInd + 
                             ever_received_chemotherapy + first_chemo_age + year_first_chemo +
-                            ever_first_med_age + year_first_medication
+                            ever_first_med_age + year_first_medication + 
+                            pre_other_cancer_drug_seperated_byslash+ post_other_cancer_drug_seperated_byslash
                           ~ rowid(AvatarKey),
                           value.var = c("AgeAtMedStart", "regimen_drugname", "AgeAtMedStop",
                                         "narrow_drug_class_cytotoxic_only", "general_drug_class")) %>% 
@@ -507,6 +675,152 @@ Radiation_wide <- dcast(setDT(Radiation),
 #                  "/Radiation wide format_",
 #                  today(), ".rds"))
 
+
+# SurgeryBiopsy----
+SurgeryBiopsy <- SurgeryBiopsy %>%
+  filter(str_detect(AvatarKey, paste0(lung_patients1$ORIENAvatarKey, collapse = "|"))) %>% 
+  mutate(across(c("AgeAtSurgeryBiopsy"), ~ case_when(
+                    . == "Age 90 or older"                ~ 90,
+                    . == "Unknown/Not Applicable"         ~ NA_real_,
+                    TRUE                                  ~ as.numeric(.)
+                  )))
+
+
+surgery_ever <- SurgeryBiopsy %>%
+  filter(SiteTherapeutic == "Yes" |
+           str_detect(SiteTherapeutic, "Unknown")) |> 
+  filter(str_detect(PrimaryDiagnosisSite, "Lung|lung|bronchus") |
+           (str_detect(PrimaryDiagnosisSite, "Unknown") &
+              str_detect(SurgeryBiopsyLocation, "Lung|lung|bronchus")) |
+           (PrimaryDiagnosisSite == "Head of pancreas" &
+              AgeAtSurgeryBiopsy == 62.959)) %>%
+  left_join(., Diagnosis %>%
+              select(AvatarKey, AgeAtDiagnosis),
+            by = c("AvatarKey")) %>%
+  mutate(update_age_at_diagosis_with_age_at_surgery = case_when(
+    AgeAtSurgeryBiopsy < AgeAtDiagnosis       ~ "Update age at diagosis with age at surgery"
+  ), .after = AgeAtSurgeryBiopsy) |> 
+  arrange(AvatarKey, AgeAtSurgeryBiopsy) |> 
+  distinct(AvatarKey, .keep_all = TRUE) |> 
+  select(-c(SurgeryBiopsyInd, AgeAtDiagnosis)) |> 
+  mutate(surgery_ever = "Yes", .after = 1)
+
+surgery_never <- SurgeryBiopsy %>%
+  filter(SiteTherapeutic == "No" | 
+           SurgeryBiopsyInd == "No" |
+           !str_detect(AvatarKey, paste0(surgery_ever$AvatarKey, collapse = "|"))
+           ) |> 
+  select(AvatarKey) |> 
+  distinct() |> 
+  mutate(surgery_ever = "No")
+
+surgery_ever <- bind_rows(surgery_ever, surgery_never) |> 
+  distinct(AvatarKey, .keep_all = TRUE) |> 
+  mutate(has_surgery_data = "Yes")
+
+rm(surgery_never)
+
+
+# StemCellTransplant----
+StemCellTransplant1 <- StemCellTransplant %>%
+  filter(str_detect(AvatarKey, paste0(lung_patients1$ORIENAvatarKey, collapse = "|"))) %>% 
+  filter(SCTInd == "Yes" | is.na(SCTInd))
+
+
+################################################################################# II ### First merge to call first treatment
+# This is needed to pick the right progression / recurrence event
+data <- lung_patients1 %>% 
+  rename(AvatarKey = ORIENAvatarKey) %>%
+  left_join(., demographics, by = "AvatarKey") %>% 
+  left_join(., Diagnosis, by = "AvatarKey") %>% 
+  left_join(., VitalStatus, by = "AvatarKey") %>% 
+  left_join(., Medications_wide, by = "AvatarKey") %>% 
+  left_join(., Radiation_wide, by = "AvatarKey") %>% 
+  left_join(., surgery_ever, by = "AvatarKey") %>% 
+  left_join(., PatientHistory, by = "AvatarKey")
+
+treatment <- data |> 
+  select(everything(), -c(AgeAtMedStart_1, AgeAtRadiationStart_1, AgeAtSurgeryBiopsy),
+         AgeAtMedStart_1, AgeAtRadiationStart_1, AgeAtSurgeryBiopsy) |> 
+  mutate(treatment_sequence_excl_surgery = case_when(
+    AgeAtMedStart_1 <= AgeAtRadiationStart_1               ~ "drug/rad",
+    AgeAtMedStart_1 > AgeAtRadiationStart_1                ~ "rad/drug",
+    drug_ever == "No" &
+      radiation_ever == "No"                               ~ "No drug or radiation",
+    drug_ever == "Yes" &
+      radiation_ever == "No"                               ~ "drug only",
+    radiation_ever == "Yes" &
+      drug_ever == "No"                                    ~ "radiation only",
+    is.na(AgeAtMedStart_1) &
+      is.na(AgeAtRadiationStart_1)                         ~ "missing drug and rad age",
+    is.na(AgeAtMedStart_1)                                 ~ "missing drug age",
+    is.na(AgeAtRadiationStart_1)                           ~ "missing rad age"
+  )) |> 
+  mutate(first_treatment_excl_surgery = case_when(
+    str_detect(treatment_sequence_excl_surgery, "^rad")    ~ "Radiation",
+    str_detect(treatment_sequence_excl_surgery, "^drug")   ~ "Drugs",
+  )) |> 
+  mutate(age_at_first_treatment_excl_surgery = case_when(
+    first_treatment_excl_surgery == "Radiation"            ~ AgeAtRadiationStart_1,
+    first_treatment_excl_surgery == "Drugs"                ~ AgeAtMedStart_1
+  )) %>% 
+  # Age at first treatment
+  mutate(treatment_sequence_incl_surgery = case_when(
+    AgeAtRadiationStart_1 < AgeAtSurgeryBiopsy &
+      AgeAtRadiationStart_1 < AgeAtMedStart_1 &
+      AgeAtSurgeryBiopsy < AgeAtMedStart_1                 ~ "rad/surg/drug",
+    AgeAtRadiationStart_1 < AgeAtSurgeryBiopsy &
+      AgeAtRadiationStart_1 < AgeAtMedStart_1 &
+      AgeAtMedStart_1 < AgeAtSurgeryBiopsy                 ~ "rad/drug/surg",
+    AgeAtSurgeryBiopsy < AgeAtRadiationStart_1 &
+      AgeAtSurgeryBiopsy < AgeAtMedStart_1 &
+      AgeAtRadiationStart_1 < AgeAtMedStart_1              ~ "surg/rad/drug",
+    AgeAtSurgeryBiopsy < AgeAtRadiationStart_1 &
+      AgeAtSurgeryBiopsy < AgeAtMedStart_1 &
+      AgeAtMedStart_1 < AgeAtRadiationStart_1              ~ "surg/drug/rad",
+    AgeAtMedStart_1 < AgeAtSurgeryBiopsy &
+      AgeAtMedStart_1 < AgeAtRadiationStart_1 &
+      AgeAtSurgeryBiopsy < AgeAtRadiationStart_1           ~ "drug/surg/rad",
+    AgeAtMedStart_1 < AgeAtSurgeryBiopsy &
+      AgeAtMedStart_1 < AgeAtRadiationStart_1 &
+      AgeAtRadiationStart_1 < AgeAtSurgeryBiopsy           ~ "drug/rad/surg",
+    drug_ever == "No" &
+      radiation_ever == "No" &
+      surgery_ever == "No"                                 ~ "No drug or radiation or surgery",
+    drug_ever == "Yes" &
+      is.na(AgeAtMedStart_1)                               ~ "missing at least drug age",
+    radiation_ever == "Yes" &
+      is.na(AgeAtRadiationStart_1)                         ~ "missing at least rad age",
+    surgery_ever == "Yes" &
+      is.na(AgeAtSurgeryBiopsy)                            ~ "missing at least surg age",
+    AgeAtRadiationStart_1 < AgeAtSurgeryBiopsy             ~ "rad/surg",
+    AgeAtRadiationStart_1 < AgeAtMedStart_1                ~ "rad/drug",
+    AgeAtSurgeryBiopsy < AgeAtRadiationStart_1             ~ "surg/rad",
+    AgeAtSurgeryBiopsy < AgeAtMedStart_1                   ~ "surg/drug",
+    AgeAtMedStart_1 < AgeAtSurgeryBiopsy                   ~ "drug/surg",
+    AgeAtMedStart_1 < AgeAtRadiationStart_1                ~ "drug/rad",
+    !is.na(AgeAtRadiationStart_1)                          ~ "rad",
+    !is.na(AgeAtSurgeryBiopsy)                             ~ "surg",
+    !is.na(AgeAtMedStart_1)                                ~ "drug"
+  )) %>% 
+  mutate(first_treatment_incl_surgery = case_when(
+    str_detect(treatment_sequence_incl_surgery, "^rad")    ~ "Radiation",
+    str_detect(treatment_sequence_incl_surgery, "^surg")   ~ "Surgery",
+    str_detect(treatment_sequence_incl_surgery, "^drug")   ~ "Drugs",
+  )) %>% 
+  mutate(age_at_first_treatment_incl_surgery = case_when(
+    first_treatment_incl_surgery == "Surgery"              ~ AgeAtSurgeryBiopsy,
+    first_treatment_incl_surgery == "Radiation"            ~ AgeAtRadiationStart_1,
+    first_treatment_incl_surgery == "Drugs"                ~ AgeAtMedStart_1
+  )) |> 
+  mutate(upfront_treatemnt = case_when(
+    str_detect(treatment_sequence_incl_surgery, "^rad")    ~ "Upfront systemic",
+    str_detect(treatment_sequence_incl_surgery, "^surg")   ~ "Upfront surgery",
+    str_detect(treatment_sequence_incl_surgery, "^drug")   ~ "Upfront systemic"
+  ))
+
+
+################################################################################# II ### Data cleaning part 2
 # PFS ----
 Outcomes_save <- Outcomes
 Outcomes <- Outcomes_save
@@ -519,13 +833,6 @@ Outcomes <- Outcomes %>%
                                   NA_character_))) |> 
   distinct() |> 
   purrr::keep(~!all(is.na(.))) |> 
-  # mutate(is_ovary_outcome = case_when(
-  #   OutcomesPrimaryDiagnosisSite %in% c(
-  #     "Ovary", "Fallopian tube", 
-  #     "Peritoneum, NOS", 
-  #     "Specified parts of peritoneum",
-  #     "Overlapping lesion of female genital organs")      ~ "Yes"
-  # )) %>% 
   mutate(not_real_pfsage = case_when(
     AgeAtProgRecur == "Age 90 or older"   ~ "Age 90 or older"
   )) %>%
@@ -542,6 +849,7 @@ Outcomes <- Outcomes %>%
          everything())
 
 Outcomes1 <- Outcomes |> 
+  mutate(has_outcome_data = "Yes") |> 
   mutate(is_lung_pfs_info = case_when(
     str_detect(OutcomesPrimaryDiagnosisSite, "lung")    ~ "Yes",
     str_detect(OutcomesPrimaryDiagnosisSite, "Lung")    ~ "Yes",
@@ -549,52 +857,79 @@ Outcomes1 <- Outcomes |>
     OutcomesPrimaryDiagnosisSite == "Head of pancreas" &
       AgeAtProgRecur == 62.838                          ~ "Yes"
   )) %>%
-  inner_join(., Diagnosis %>%
-               select(AvatarKey, number_of_dx),
+  mutate(age_at_disease_check = coalesce(AgeAtProgRecur, AgeAtCurrentDiseaseStatus), 
+         .after = AgeAtCurrentDiseaseStatus) %>% 
+  arrange(AvatarKey, age_at_disease_check) %>% 
+  inner_join(., treatment %>%
+               select(AvatarKey, AgeAtDiagnosis, number_of_dx, 
+                      upfront_treatemnt, age_at_first_treatment_incl_surgery,
+                      post_cancer_info_seperated_byslash
+                      ),
              by = "AvatarKey") |> 
+  mutate(post_age = str_match(post_cancer_info_seperated_byslash, "(\\d+\\.\\d+); |(\\d+); ")[,2],
+         post_age = as.numeric(post_age)) |> 
+  mutate(post_age2 = str_match(post_cancer_info_seperated_byslash, "(\\d+); ")[,2],
+         post_age2 = as.numeric(post_age2)) |> 
+  mutate(post_age = coalesce(post_age, post_age2)) |> select(-post_age2) |> 
+  filter(age_at_disease_check > AgeAtDiagnosis) |> 
   # 4 patients have outcomes info for missing site but they all have only 1 dx 
   # keep info into data and age meet dx age
   # group_by(AvatarKey) |>
   # fill(is_lung_pfs_info, .direction = "updown") |>
   # ungroup() |> 
-  # Patients with oucomes data for another site but none for lung
-  # Those outcomes are truely for the other site - exclude
+  # Patients with outcomes data for another site but none for lung
+  # Those outcomes are truly for the other site - exclude
   filter(is_lung_pfs_info == "Yes" | 
            (is.na(is_lung_pfs_info) & is.na(OutcomesPrimaryDiagnosisSite))|
            (is.na(is_lung_pfs_info) & number_of_dx == 1)) |> 
-  select(-number_of_dx) |> 
-  mutate(age_at_disease_check = coalesce(AgeAtProgRecur, AgeAtCurrentDiseaseStatus), 
-         .after = AgeAtCurrentDiseaseStatus) %>% 
-  arrange(AvatarKey, age_at_disease_check)
+  # Some event after post cancer but all of them are noted for Lung cancer - keep in
+  # filter((age_at_disease_check <= post_age & !is.na(ProgRecurInd)) |
+  #          is.na(post_age) |
+  #          is.na(ProgRecurInd))
+  select(-c(number_of_dx, post_cancer_info_seperated_byslash))
 
-Outcomes2 <- Outcomes1 %>%
+Outcomes2 <- Outcomes1 |> 
+  filter(age_at_disease_check > age_at_first_treatment_incl_surgery)
+
+Outcomes_yes <- Outcomes2 %>%
   filter(!is.na(ProgRecurInd)) |> 
   mutate(AgeAtProgRecur = coalesce(AgeAtProgRecur, AgeAtCurrentDiseaseStatus)) |> 
-  arrange(AvatarKey, AgeAtProgRecur) |> 
+  arrange(AvatarKey, AgeAtProgRecur) %>% 
+  # left_join(., Medications_wide %>%
+  #              select(AvatarKey, AgeAtMedStart_1, drug_ever),
+  #           by = "AvatarKey") |> 
+  # mutate(age_before = case_when(
+  #   AgeAtProgRecur <= AgeAtMedStart_1       ~ "Before"
+  # ), .after = AgeAtProgRecur) |> 
+  # mutate(age_beforedx = case_when(
+  #   AgeAtProgRecur <= AgeAtDiagnosis       ~ "Before",
+  #   TRUE     ~ "not"
+  # ), .after = AgeAtProgRecur) |> 
+  # select(AvatarKey, AgeAtProgRecur, AgeAtDiagnosis, AgeAtMedStart_1, drug_ever, everything()) %>%
+  # left_join(., Medications %>%
+  #             select(AvatarKey, AgeAtMedStart, Medication, MedPrimaryDiagnosisSite),
+  #           by = "AvatarKey") |> 
+  # filter(age_beforedx == "not" & age_before == "Before") |> 
+  # select(AvatarKey, ProgRecurInd, AgeAtProgRecur, AgeAtDiagnosis, AgeAtMedStart_1, AgeAtMedStart, Medication, MedPrimaryDiagnosisSite)
   distinct(AvatarKey, .keep_all = TRUE)
 
-pfs_free <- Outcomes1 %>%
+pfs_free <- Outcomes2 %>%
   filter(is.na(ProgRecurInd)) |> 
-  filter(!str_detect(AvatarKey, paste0(Outcomes2$AvatarKey, collapse = "|"))) |> 
-  arrange(AvatarKey, age_at_disease_check) |> 
+  filter(!str_detect(AvatarKey, paste0(Outcomes_yes$AvatarKey, collapse = "|"))) |> 
+  arrange(AvatarKey, desc(age_at_disease_check)) |> 
   distinct(AvatarKey, .keep_all = TRUE) |> 
   mutate(ProgRecurInd = "No")
 
-Outcomes <- bind_rows(Outcomes2, pfs_free) |> 
+Outcomes <- bind_rows(Outcomes_yes, pfs_free) |> 
   mutate(has_outcomes_data = "Yes") |> 
-  distinct(AvatarKey, .keep_all = TRUE)
+  distinct(AvatarKey, .keep_all = TRUE) |> 
+  select(-c(AgeAtDiagnosis, 
+         upfront_treatemnt, age_at_first_treatment_incl_surgery))
   
 
 ################################################################################# III ### Merging
-data <- lung_patients1 %>% 
-  rename(AvatarKey = ORIENAvatarKey) %>%
-  left_join(., demographics, by = "AvatarKey") %>% 
-  left_join(., Diagnosis, by = "AvatarKey") %>% 
-  left_join(., VitalStatus, by = "AvatarKey") %>% 
+data <- treatment %>%
   left_join(., Outcomes, by = "AvatarKey") %>% 
-  left_join(., Medications_wide, by = "AvatarKey") %>% 
-  left_join(., Radiation_wide, by = "AvatarKey") %>% 
-  left_join(., PatientHistory, by = "AvatarKey") %>% 
   mutate(drug_radiation_ever = case_when(
     drug_ever == "Yes" &
       radiation_ever == "Yes"                              ~ "Drug+Radiation",
@@ -605,7 +940,6 @@ data <- lung_patients1 %>%
     drug_ever == "No"                                      ~ "Not received drug",
     radiation_ever == "No"                                 ~ "Not received rad"
   )) %>% 
-  
   mutate(blood_before_drug = case_when(
     age_at_germline_collection <= AgeAtMedStart_1          ~ "blood before drug",
     age_at_germline_collection > AgeAtMedStart_1           ~ "blood after drug",
@@ -691,41 +1025,11 @@ data <- lung_patients1 %>%
       AgeAtMedStart_1 <= AgeAtRadiationStart_1       ~ age_at_germline_collection - AgeAtMedStart_1,
     blood_before_drugorrad == "blood after drug/rad" &
       AgeAtMedStart_1 > AgeAtRadiationStart_1        ~ age_at_germline_collection - AgeAtRadiationStart_1
-  )) %>% 
-  
-  mutate(treatment_sequence = case_when(
-    AgeAtMedStart_1 <= AgeAtRadiationStart_1               ~ "drug/rad",
-    AgeAtMedStart_1 > AgeAtRadiationStart_1                ~ "rad/drug",
-    drug_ever == "No" &
-      radiation_ever == "No"                               ~ "No drug or radiation",
-    drug_ever == "Yes" &
-      radiation_ever == "No"                               ~ "Drug only",
-    radiation_ever == "Yes" &
-      drug_ever == "No"                                    ~ "Radiation only",
-    is.na(AgeAtMedStart_1) &
-      is.na(AgeAtRadiationStart_1)                         ~ "missing drug and rad age",
-    is.na(AgeAtMedStart_1)                                 ~ "missing drug age",
-    is.na(AgeAtRadiationStart_1)                           ~ "missing rad age"
-  ), .after = blood_before_rad) %>% 
-  select(AvatarKey : treatment_sequence, contains("ever_first"), everything())
+  ))
 
 
 # PFS and OS
 data <- data |> 
-  # Age at first treatment
-  mutate(first_treatment = case_when(
-      (AgeAtRadiationStart_1 < AgeAtMedStart_1 |
-         (is.na(AgeAtMedStart_1) &
-            !is.na(AgeAtRadiationStart_1)))              ~ "Radiation",
-    
-    (AgeAtMedStart_1 < AgeAtRadiationStart_1 | 
-       (is.na(AgeAtRadiationStart_1) &
-          !is.na(AgeAtMedStart_1)))                      ~ "Drugs"
-  )) %>% 
-  mutate(age_at_first_treatment = case_when(
-    first_treatment == "Radiation"                  ~ AgeAtRadiationStart_1,
-    first_treatment == "Drugs"                      ~ AgeAtMedStart_1
-  )) %>% 
   # OS
   mutate(os_event = case_when(
     VitalStatus == "Alive"                          ~ 0,
@@ -733,23 +1037,53 @@ data <- data |>
   )) %>% 
   mutate(os_age = coalesce(AgeAtDeath, AgeAtLastContact)) %>% 
   mutate(os_time_from_dx_years = os_age - AgeAtDiagnosis) %>% 
-  mutate(os_time_from_treatment_years = os_age - age_at_first_treatment) %>% 
+  mutate(os_time_from_treatment_years = os_age - age_at_first_treatment_incl_surgery) %>% 
   # PFS
   mutate(pfs_event = case_when(
-    ProgRecurInd == "Progression"                   ~ 1,
-    ProgRecurInd == "Recurrence"                    ~ 1,
-    os_event == 1                                   ~ 1,
-    ProgRecurInd == "No"                            ~ 0
+    upfront_treatemnt == "Upfront systemic" &
+      ProgRecurInd == "Progression"                 ~ 1,
+    upfront_treatemnt == "Upfront systemic" &
+      ProgRecurInd == "Recurrence"                  ~ 2,
+    upfront_treatemnt == "Upfront systemic" &
+      os_event == 1                                 ~ 1,
+    upfront_treatemnt == "Upfront systemic" &
+      ProgRecurInd == "No"                          ~ 0
   )) %>% 
   mutate(pfs_age = case_when(
-    ProgRecurInd == "Progression"                   ~ AgeAtProgRecur,
-    ProgRecurInd == "Recurrence"                    ~ AgeAtProgRecur,
-    os_event == 1                                   ~ os_age,
-    ProgRecurInd == "No"                            ~ os_age
+    upfront_treatemnt == "Upfront systemic" &
+      ProgRecurInd == "Progression"                 ~ AgeAtProgRecur,
+    upfront_treatemnt == "Upfront systemic" &
+      ProgRecurInd == "Recurrence"                  ~ AgeAtProgRecur,
+    upfront_treatemnt == "Upfront systemic" &
+      os_event == 1                                 ~ os_age,
+    upfront_treatemnt == "Upfront systemic" &
+      ProgRecurInd == "No"                          ~ os_age
   )) %>% 
   mutate(pfs_time_from_dx_years = pfs_age - AgeAtDiagnosis) %>% 
-  mutate(pfs_time_from_treatment_years = pfs_age - age_at_first_treatment)
-
+  mutate(pfs_time_from_treatment_years = pfs_age - age_at_first_treatment_incl_surgery) |> 
+  # DFS
+  mutate(dfs_event = case_when(
+    upfront_treatemnt == "Upfront surgery" &
+      ProgRecurInd == "Progression"                 ~ 1,
+    upfront_treatemnt == "Upfront surgery" &
+      ProgRecurInd == "Recurrence"                  ~ 2,
+    upfront_treatemnt == "Upfront surgery" &
+      os_event == 1                                 ~ 1,
+    upfront_treatemnt == "Upfront surgery" &
+      ProgRecurInd == "No"                          ~ 0
+  )) %>% 
+  mutate(dfs_age = case_when(
+    upfront_treatemnt == "Upfront surgery" &
+      ProgRecurInd == "Progression"                 ~ AgeAtProgRecur,
+    upfront_treatemnt == "Upfront surgery" &
+      ProgRecurInd == "Recurrence"                  ~ AgeAtProgRecur,
+    upfront_treatemnt == "Upfront surgery" &
+      os_event == 1                                 ~ os_age,
+    upfront_treatemnt == "Upfront surgery" &
+      ProgRecurInd == "No"                          ~ os_age
+  )) %>% 
+  mutate(dfs_time_from_dx_years = dfs_age - AgeAtDiagnosis) %>% 
+  mutate(dfs_time_from_treatment_years = dfs_age - age_at_first_treatment_incl_surgery)
 
 write_rds(data,
           paste0(here::here(),
