@@ -1043,7 +1043,7 @@ data <- data |>
     upfront_treatemnt == "Upfront systemic" &
       ProgRecurInd == "Progression"                 ~ 1,
     upfront_treatemnt == "Upfront systemic" &
-      ProgRecurInd == "Recurrence"                  ~ 2,
+      ProgRecurInd == "Recurrence"                  ~ 1,
     upfront_treatemnt == "Upfront systemic" &
       os_event == 1                                 ~ 1,
     upfront_treatemnt == "Upfront systemic" &
@@ -1066,7 +1066,7 @@ data <- data |>
     upfront_treatemnt == "Upfront surgery" &
       ProgRecurInd == "Progression"                 ~ 1,
     upfront_treatemnt == "Upfront surgery" &
-      ProgRecurInd == "Recurrence"                  ~ 2,
+      ProgRecurInd == "Recurrence"                  ~ 1,
     upfront_treatemnt == "Upfront surgery" &
       os_event == 1                                 ~ 1,
     upfront_treatemnt == "Upfront surgery" &
@@ -1099,13 +1099,13 @@ write_csv(data,
 
 write_rds(data,
           paste0(path_raw,
-                 "/ProcessedData",
+                 "/ProcessedData/CHinORIEN_Lung",
                  "/Lung_CHinORIEN_",
                  str_remove_all(today(), "-"), ".rds"))
 
 write_csv(data,
           paste0(path_raw,
-                 "/ProcessedData",
+                 "/ProcessedData/CHinORIEN_Lung",
                  "/Lung_CHinORIEN_",
                  str_remove_all(today(), "-"), ".csv"))
 
