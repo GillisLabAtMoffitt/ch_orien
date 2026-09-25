@@ -742,7 +742,9 @@ data <- lung_patients1 %>%
 treatment <- data |> 
   select(everything(), -c(AgeAtMedStart_1, AgeAtRadiationStart_1, AgeAtSurgeryBiopsy),
          AgeAtMedStart_1, AgeAtRadiationStart_1, AgeAtSurgeryBiopsy) |> 
-  mutate(treatment_sequence_excl_surgery = case_when(
+  mutate(treatment_sequence_surgery_excluded = case_when(
+    is.na(has_medication_data)                             ~ NA_character_,
+    is.na(has_radiation_data)                              ~ NA_character_,
     AgeAtMedStart_1 <= AgeAtRadiationStart_1               ~ "drug/rad",
     AgeAtMedStart_1 > AgeAtRadiationStart_1                ~ "rad/drug",
     drug_ever == "No" &
@@ -754,39 +756,47 @@ treatment <- data |>
     is.na(AgeAtMedStart_1) &
       is.na(AgeAtRadiationStart_1)                         ~ "missing drug and rad age",
     is.na(AgeAtMedStart_1)                                 ~ "missing drug age",
-    is.na(AgeAtRadiationStart_1)                           ~ "missing rad age"
+    is.na(AgeAtRadiationStart_1)                           ~ "missing rad age",
+    TRUE      ~ paste(AgeAtMedStart_1, AgeAtRadiationStart_1, sep = "; ")
   )) |> 
-  mutate(first_treatment_excl_surgery = case_when(
-    str_detect(treatment_sequence_excl_surgery, "^rad")    ~ "Radiation",
-    str_detect(treatment_sequence_excl_surgery, "^drug")   ~ "Drugs",
+  mutate(first_treatment_surgery_excluded = case_when(
+    str_detect(treatment_sequence_surgery_excluded, "^rad")    ~ "Radiation",
+    str_detect(treatment_sequence_surgery_excluded, "^drug")   ~ "Drugs",
   )) |> 
-  mutate(age_at_first_treatment_excl_surgery = case_when(
-    first_treatment_excl_surgery == "Radiation"            ~ AgeAtRadiationStart_1,
-    first_treatment_excl_surgery == "Drugs"                ~ AgeAtMedStart_1
+  mutate(age_at_first_treatment_surgery_excluded = case_when(
+    first_treatment_surgery_excluded == "Radiation"            ~ AgeAtRadiationStart_1,
+    first_treatment_surgery_excluded == "Drugs"                ~ AgeAtMedStart_1
   )) %>% 
   # Age at first treatment
-  mutate(treatment_sequence_incl_surgery = case_when(
+  mutate(treatment_sequence_surgery_included = case_when(
+    is.na(has_medication_data)                             ~ NA_character_,
+    is.na(has_surgery_data)                                ~ NA_character_,
+    is.na(has_radiation_data)                              ~ NA_character_,
+    AgeAtRadiationStart_1 == AgeAtSurgeryBiopsy &
+      AgeAtRadiationStart_1 == AgeAtMedStart_1 &
+      AgeAtSurgeryBiopsy == AgeAtMedStart_1                 ~ "same time rad/surg/drug",
     AgeAtRadiationStart_1 < AgeAtSurgeryBiopsy &
+      AgeAtRadiationStart_1 < AgeAtMedStart_1 &
+      AgeAtMedStart_1 <= AgeAtSurgeryBiopsy                 ~ "rad/drug/surg",
+    AgeAtRadiationStart_1 <= AgeAtSurgeryBiopsy &
       AgeAtRadiationStart_1 < AgeAtMedStart_1 &
       AgeAtSurgeryBiopsy < AgeAtMedStart_1                 ~ "rad/surg/drug",
-    AgeAtRadiationStart_1 < AgeAtSurgeryBiopsy &
-      AgeAtRadiationStart_1 < AgeAtMedStart_1 &
-      AgeAtMedStart_1 < AgeAtSurgeryBiopsy                 ~ "rad/drug/surg",
+    AgeAtSurgeryBiopsy < AgeAtRadiationStart_1 &
+      AgeAtSurgeryBiopsy < AgeAtMedStart_1 &
+      AgeAtMedStart_1 <= AgeAtRadiationStart_1              ~ "surg/drug/rad",
     AgeAtSurgeryBiopsy < AgeAtRadiationStart_1 &
       AgeAtSurgeryBiopsy < AgeAtMedStart_1 &
       AgeAtRadiationStart_1 < AgeAtMedStart_1              ~ "surg/rad/drug",
-    AgeAtSurgeryBiopsy < AgeAtRadiationStart_1 &
-      AgeAtSurgeryBiopsy < AgeAtMedStart_1 &
-      AgeAtMedStart_1 < AgeAtRadiationStart_1              ~ "surg/drug/rad",
-    AgeAtMedStart_1 < AgeAtSurgeryBiopsy &
+    AgeAtMedStart_1 <= AgeAtSurgeryBiopsy &
       AgeAtMedStart_1 < AgeAtRadiationStart_1 &
       AgeAtSurgeryBiopsy < AgeAtRadiationStart_1           ~ "drug/surg/rad",
     AgeAtMedStart_1 < AgeAtSurgeryBiopsy &
-      AgeAtMedStart_1 < AgeAtRadiationStart_1 &
+      AgeAtMedStart_1 <= AgeAtRadiationStart_1 &
       AgeAtRadiationStart_1 < AgeAtSurgeryBiopsy           ~ "drug/rad/surg",
     drug_ever == "No" &
       radiation_ever == "No" &
       surgery_ever == "No"                                 ~ "No drug or radiation or surgery",
+    # TRUE      ~ paste(AgeAtMedStart_1, AgeAtRadiationStart_1, AgeAtSurgeryBiopsy, sep = "; ")
     drug_ever == "Yes" &
       is.na(AgeAtMedStart_1)                               ~ "missing at least drug age",
     radiation_ever == "Yes" &
@@ -801,22 +811,23 @@ treatment <- data |>
     AgeAtMedStart_1 < AgeAtRadiationStart_1                ~ "drug/rad",
     !is.na(AgeAtRadiationStart_1)                          ~ "rad",
     !is.na(AgeAtSurgeryBiopsy)                             ~ "surg",
-    !is.na(AgeAtMedStart_1)                                ~ "drug"
+    !is.na(AgeAtMedStart_1)                                ~ "drug",
+    TRUE      ~ paste(AgeAtMedStart_1, AgeAtRadiationStart_1, AgeAtSurgeryBiopsy, sep = "; ")
+  )) |> 
+  mutate(first_treatment_surgery_included = case_when(
+    str_detect(treatment_sequence_surgery_included, "^rad")    ~ "Radiation",
+    str_detect(treatment_sequence_surgery_included, "^surg")   ~ "Surgery",
+    str_detect(treatment_sequence_surgery_included, "^drug")   ~ "Drugs",
   )) %>% 
-  mutate(first_treatment_incl_surgery = case_when(
-    str_detect(treatment_sequence_incl_surgery, "^rad")    ~ "Radiation",
-    str_detect(treatment_sequence_incl_surgery, "^surg")   ~ "Surgery",
-    str_detect(treatment_sequence_incl_surgery, "^drug")   ~ "Drugs",
-  )) %>% 
-  mutate(age_at_first_treatment_incl_surgery = case_when(
-    first_treatment_incl_surgery == "Surgery"              ~ AgeAtSurgeryBiopsy,
-    first_treatment_incl_surgery == "Radiation"            ~ AgeAtRadiationStart_1,
-    first_treatment_incl_surgery == "Drugs"                ~ AgeAtMedStart_1
+  mutate(age_at_first_treatment_surgery_included = case_when(
+    first_treatment_surgery_included == "Surgery"              ~ AgeAtSurgeryBiopsy,
+    first_treatment_surgery_included == "Radiation"            ~ AgeAtRadiationStart_1,
+    first_treatment_surgery_included == "Drugs"                ~ AgeAtMedStart_1
   )) |> 
   mutate(upfront_treatemnt = case_when(
-    str_detect(treatment_sequence_incl_surgery, "^rad")    ~ "Upfront systemic",
-    str_detect(treatment_sequence_incl_surgery, "^surg")   ~ "Upfront surgery",
-    str_detect(treatment_sequence_incl_surgery, "^drug")   ~ "Upfront systemic"
+    str_detect(treatment_sequence_surgery_included, "^rad")    ~ "Upfront systemic",
+    str_detect(treatment_sequence_surgery_included, "^surg")   ~ "Upfront surgery",
+    str_detect(treatment_sequence_surgery_included, "^drug")   ~ "Upfront systemic"
   ))
 
 
@@ -862,7 +873,8 @@ Outcomes1 <- Outcomes |>
   arrange(AvatarKey, age_at_disease_check) %>% 
   inner_join(., treatment %>%
                select(AvatarKey, AgeAtDiagnosis, number_of_dx, 
-                      upfront_treatemnt, age_at_first_treatment_incl_surgery,
+                      upfront_treatemnt, age_at_first_treatment_surgery_included,
+                      age_at_first_treatment_surgery_excluded,
                       post_cancer_info_seperated_byslash
                       ),
              by = "AvatarKey") |> 
@@ -889,7 +901,10 @@ Outcomes1 <- Outcomes |>
   select(-c(number_of_dx, post_cancer_info_seperated_byslash))
 
 Outcomes2 <- Outcomes1 |> 
-  filter(age_at_disease_check > age_at_first_treatment_incl_surgery)
+  filter((age_at_disease_check > age_at_first_treatment_surgery_included & 
+            upfront_treatemnt == "Upfront surgery") |
+           (age_at_disease_check > age_at_first_treatment_surgery_excluded & 
+              upfront_treatemnt == "Upfront systemic"))
 
 Outcomes_yes <- Outcomes2 %>%
   filter(!is.na(ProgRecurInd)) |> 
@@ -916,6 +931,7 @@ Outcomes_yes <- Outcomes2 %>%
 pfs_free <- Outcomes2 %>%
   filter(is.na(ProgRecurInd)) |> 
   filter(!str_detect(AvatarKey, paste0(Outcomes_yes$AvatarKey, collapse = "|"))) |> 
+  # For no event - pick the latest date of disease check 
   arrange(AvatarKey, desc(age_at_disease_check)) |> 
   distinct(AvatarKey, .keep_all = TRUE) |> 
   mutate(ProgRecurInd = "No")
@@ -924,7 +940,8 @@ Outcomes <- bind_rows(Outcomes_yes, pfs_free) |>
   mutate(has_outcomes_data = "Yes") |> 
   distinct(AvatarKey, .keep_all = TRUE) |> 
   select(-c(AgeAtDiagnosis, 
-         upfront_treatemnt, age_at_first_treatment_incl_surgery))
+         upfront_treatemnt, age_at_first_treatment_surgery_included,
+         age_at_first_treatment_surgery_excluded))
   
 
 ################################################################################# III ### Merging
@@ -1028,6 +1045,222 @@ data <- treatment %>%
   ))
 
 
+# data_check <- data |> 
+#   mutate(full_check = case_when(
+#     age_at_germline_collection <= AgeAtSurgeryBiopsy &
+#       AgeAtSurgeryBiopsy <= AgeAtProgRecur &
+#       (ProgRecurInd == "Progression" | 
+#          ProgRecurInd == "Recurrence") &
+#       AgeAtProgRecur <= AgeAtMedStart_1                    ~ "CH sample → surgery → progression → drug",
+#     age_at_germline_collection <= AgeAtSurgeryBiopsy &
+#       AgeAtSurgeryBiopsy <= AgeAtMedStart_1 &
+#       (ProgRecurInd == "Progression" | 
+#          ProgRecurInd == "Recurrence") &
+#       AgeAtMedStart_1 <= AgeAtProgRecur                    ~ "CH sample → surgery → drug → progression",
+#     age_at_germline_collection <= AgeAtSurgeryBiopsy &
+#       AgeAtSurgeryBiopsy <= AgeAtMedStart_1 &
+#       ProgRecurInd == "No" &
+#       AgeAtMedStart_1 <= AgeAtCurrentDiseaseStatus         ~ "CH sample → surgery → drug → no progression",
+#     age_at_germline_collection <= AgeAtSurgeryBiopsy &
+#       AgeAtSurgeryBiopsy <= AgeAtProgRecur &
+#       (ProgRecurInd == "Progression" | 
+#          ProgRecurInd == "Recurrence") &
+#       drug_ever == "No"                                    ~ "CH sample → surgery → progression, no subsequent drug",
+#     age_at_germline_collection <= AgeAtSurgeryBiopsy &
+#       ProgRecurInd == "No" &
+#       drug_ever == "No"                                    ~ "CH sample → surgery only, no progression",
+#     age_at_germline_collection <= AgeAtMedStart_1 &
+#       AgeAtMedStart_1 <= AgeAtProgRecur &
+#       (ProgRecurInd == "Progression" | 
+#          ProgRecurInd == "Recurrence") &
+#       surgery_ever == "No"                                 ~ "CH sample → drug → progression, no surgery",
+#     age_at_germline_collection <= AgeAtMedStart_1 &
+#       AgeAtMedStart_1 <= AgeAtProgRecur &
+#       (ProgRecurInd == "Progression" | 
+#          ProgRecurInd == "Recurrence") &
+#       AgeAtProgRecur <= AgeAtSurgeryBiopsy                 ~ "CH sample → drug → progression → surgery",
+#     age_at_germline_collection <= AgeAtMedStart_1 &
+#       AgeAtMedStart_1 <= AgeAtSurgeryBiopsy &
+#       AgeAtSurgeryBiopsy <= AgeAtProgRecur &
+#       (ProgRecurInd == "Progression" | 
+#          ProgRecurInd == "Recurrence")                     ~ "CH sample → drug → surgery → progression",
+#     age_at_germline_collection <= AgeAtMedStart_1 &
+#       AgeAtMedStart_1 <= AgeAtSurgeryBiopsy &
+#       ProgRecurInd == "No"                                 ~ "CH sample → drug → surgery, no progression",
+#     age_at_germline_collection <= AgeAtMedStart_1 &
+#       surgery_ever == "No" &
+#       ProgRecurInd == "No"                                 ~ "CH sample → drug, no surgery, no progression",
+#     !is.na(age_at_germline_collection) &
+#       drug_ever == "No" &
+#       surgery_ever == "No" &
+#       ProgRecurInd == "No"                                 ~ "CH sample, no drug, no surgery, no progression",
+#     !is.na(age_at_germline_collection) &
+#       is.na(drug_ever) &
+#       surgery_ever == "No" &
+#       ProgRecurInd == "No"                                 ~ "CH sample, unknown drug, no surgery, no progression",
+#     age_at_germline_collection <= AgeAtSurgeryBiopsy &
+#       is.na(drug_ever) &
+#       ProgRecurInd == "No"                                 ~ "CH sample → surgery, unknown drug, no progression",
+#     age_at_germline_collection <= AgeAtSurgeryBiopsy &
+#       AgeAtSurgeryBiopsy <= AgeAtProgRecur &
+#       (ProgRecurInd == "Progression" | 
+#          ProgRecurInd == "Recurrence") &
+#       is.na(drug_ever)                                     ~ "CH sample → surgery → progression, unknown drug",
+#     
+#     
+#     
+#     
+#     age_at_germline_collection <= AgeAtProgRecur &
+#       AgeAtProgRecur <= AgeAtMedStart_1 &
+#       (ProgRecurInd == "Progression" | 
+#          ProgRecurInd == "Recurrence") &
+#       surgery_ever == "No"                                 ~ "CH sample → progression → drug, no surgery",
+#     
+#     
+#     
+#     
+#     
+#     AgeAtSurgeryBiopsy <= AgeAtMedStart_1 &
+#       AgeAtMedStart_1 <= age_at_germline_collection &
+#       age_at_germline_collection <= AgeAtProgRecur &
+#       (ProgRecurInd == "Progression" | 
+#          ProgRecurInd == "Recurrence")                     ~ "Surgery → drug → CH sample → progression",
+#     AgeAtSurgeryBiopsy <= AgeAtMedStart_1 &
+#       AgeAtMedStart_1 <= age_at_germline_collection &
+#       ProgRecurInd == "No"                                 ~ "Surgery → drug → CH sample, no progression",
+#     AgeAtSurgeryBiopsy <= age_at_germline_collection &
+#       age_at_germline_collection <= AgeAtMedStart_1 &
+#       AgeAtMedStart_1 <= AgeAtProgRecur &
+#       (ProgRecurInd == "Progression" | 
+#          ProgRecurInd == "Recurrence")                     ~ "Surgery → CH sample → drug → progression",
+#     AgeAtSurgeryBiopsy <= age_at_germline_collection &
+#       age_at_germline_collection <= AgeAtMedStart_1 &
+#       ProgRecurInd == "No"                                 ~ "Surgery → CH sample → drug, no progression",
+#     
+#     AgeAtSurgeryBiopsy <= age_at_germline_collection &
+#       age_at_germline_collection <= AgeAtProgRecur &
+#       (ProgRecurInd == "Progression" | 
+#          ProgRecurInd == "Recurrence") &
+#       drug_ever == "No"                                    ~ "Surgery → CH sample → progression, no drug",
+#     AgeAtSurgeryBiopsy <= age_at_germline_collection &
+#       age_at_germline_collection <= AgeAtProgRecur &
+#       (ProgRecurInd == "Progression" | 
+#          ProgRecurInd == "Recurrence") &
+#       AgeAtProgRecur <= AgeAtMedStart_1                    ~ "Surgery → CH sample → progression, drug",
+#     AgeAtSurgeryBiopsy <= age_at_germline_collection &
+#       is.na(drug_ever) &
+#       ProgRecurInd == "No"                                 ~ "Surgery → CH sample, unknown drug, no progression",
+#     AgeAtSurgeryBiopsy <= age_at_germline_collection &
+#       age_at_germline_collection <= AgeAtProgRecur &
+#       (ProgRecurInd == "Progression" | 
+#          ProgRecurInd == "Recurrence") &
+#       is.na(drug_ever)                                     ~ "Surgery → CH sample → progression, unknown drug",
+#     
+#     
+#     
+#     
+#     
+#     AgeAtSurgeryBiopsy <= age_at_germline_collection &
+#       ProgRecurInd == "No" &
+#       drug_ever == "No"                                    ~ "Surgery → CH sample, no progression, no drug",
+# 
+#     AgeAtMedStart_1 <= age_at_germline_collection &
+#       age_at_germline_collection <= AgeAtProgRecur &
+#       (ProgRecurInd == "Progression" | 
+#          ProgRecurInd == "Recurrence") &
+#       AgeAtProgRecur <= AgeAtSurgeryBiopsy                 ~ "Drug → CH sample → progression → surgery",
+#     AgeAtMedStart_1 <= age_at_germline_collection &
+#       age_at_germline_collection <= AgeAtSurgeryBiopsy &
+#       ProgRecurInd == "No"                                 ~ "Drug → CH sample → surgery, no progression",
+#     AgeAtMedStart_1 <= age_at_germline_collection &
+#       age_at_germline_collection <= AgeAtSurgeryBiopsy &
+#       AgeAtSurgeryBiopsy <= AgeAtProgRecur &
+#       (ProgRecurInd == "Progression" | 
+#          ProgRecurInd == "Recurrence")                     ~ "Drug → CH sample → surgery → progression",
+#     AgeAtMedStart_1 <= age_at_germline_collection &
+#       age_at_germline_collection <= AgeAtProgRecur &
+#       (ProgRecurInd == "Progression" | 
+#          ProgRecurInd == "Recurrence") &
+#       surgery_ever == "No"                                 ~ "Drug → CH sample → progression, no surgery",
+#     AgeAtMedStart_1 <= age_at_germline_collection &
+#       surgery_ever == "No" &
+#       ProgRecurInd == "No"                                 ~ "Drug → CH sample, no progression, no surgery",
+#     AgeAtMedStart_1 <= AgeAtSurgeryBiopsy &
+#       AgeAtSurgeryBiopsy <= age_at_germline_collection &
+#       (ProgRecurInd == "Progression" | 
+#          ProgRecurInd == "Recurrence") &
+#       age_at_germline_collection <= AgeAtProgRecur         ~ "Drug → surgery → CH sample → progression",
+#     AgeAtMedStart_1 <= AgeAtSurgeryBiopsy &
+#       AgeAtSurgeryBiopsy <= age_at_germline_collection &
+#       ProgRecurInd == "No"                                 ~ "Drug → surgery → CH sample, no progression",
+#     
+#     
+#     
+#     
+#     
+#     
+#     
+#     
+#     
+#     
+#     
+#     AgeAtProgRecur <= age_at_germline_collection &
+#       (ProgRecurInd == "Progression" | 
+#          ProgRecurInd == "Recurrence")                     ~ "Progression → CH sample",
+#     is.na(ProgRecurInd)                                    ~ "Missing progression info",
+#     TRUE        ~ paste("sample", age_at_germline_collection,
+#                         "progression", ProgRecurInd, AgeAtProgRecur, AgeAtCurrentDiseaseStatus,
+#                          "drug" , drug_ever, AgeAtMedStart_1,
+#                          "surgery" , surgery_ever, AgeAtSurgeryBiopsy,
+#                          # "radiation" , radiation_ever, AgeAtRadiationStart_1, 
+#                         sep = ",")
+#   ))
+# 
+# library(gtsummary)
+# theme_gtsummary_compact()
+# data_check |> 
+#   select(full_check) |> 
+#   tbl_summary(sort = everything() ~ "frequency")
+# 
+# data_check |> 
+#   mutate("Time CH sample → surgery (months)" = (AgeAtSurgeryBiopsy - age_at_germline_collection) * 12) |> 
+#   filter(`Time CH sample → surgery (months)` >= 0) |> 
+#   ggplot(aes(x = `Time CH sample → surgery (months)`))+
+#   geom_histogram()
+# 
+# data_check |> 
+#   mutate("Time CH sample → first drug (months)" = (AgeAtMedStart_1 - age_at_germline_collection) * 12) |> 
+#   filter(`Time CH sample → first drug (months)` >= 0) |> 
+#   ggplot(aes(x = `Time CH sample → first drug (months)`))+
+#   geom_histogram()
+# 
+# data_check |> 
+#   mutate("Time CH sample → progression (months)" = (AgeAtProgRecur - age_at_germline_collection) * 12) |> 
+#   filter(`Time CH sample → progression (months)` >= 0) |> 
+#   ggplot(aes(x = `Time CH sample → progression (months)`))+
+#   geom_histogram()
+# 
+# data_check |> 
+#   mutate("Time Surgery → first drug (months)" = (AgeAtMedStart_1 - AgeAtSurgeryBiopsy) * 12) |> 
+#   filter(`Time Surgery → first drug (months)` >= 0) |> 
+#   ggplot(aes(x = `Time Surgery → first drug (months)`))+
+#   geom_histogram()
+# 
+# data_check |> 
+#   mutate("Time Surgery → progression (months)" = (AgeAtProgRecur - AgeAtSurgeryBiopsy) * 12) |> 
+#   filter(`Time Surgery → progression (months)` >= 0) |> 
+#   ggplot(aes(x = `Time Surgery → progression (months)`))+
+#   geom_histogram()
+# 
+# data_check |> 
+#   mutate("Time First drug → progression (months)" = (AgeAtProgRecur - AgeAtMedStart_1) * 12) |> 
+#   filter(`Time First drug → progression (months)` >= 0) |> 
+#   ggplot(aes(x = `Time First drug → progression (months)`))+
+#   geom_histogram()
+
+
+
+
 # PFS and OS
 data <- data |> 
   # OS
@@ -1037,53 +1270,68 @@ data <- data |>
   )) %>% 
   mutate(os_age = coalesce(AgeAtDeath, AgeAtLastContact)) %>% 
   mutate(os_time_from_dx_years = os_age - AgeAtDiagnosis) %>% 
-  mutate(os_time_from_treatment_years = os_age - age_at_first_treatment_incl_surgery) %>% 
+  mutate(os_time_from_treatment_years = os_age - age_at_first_treatment_surgery_included) %>% 
   # PFS
   mutate(pfs_event = case_when(
+    upfront_treatemnt == "Upfront surgery"          ~ NA_real_,
     upfront_treatemnt == "Upfront systemic" &
-      ProgRecurInd == "Progression"                 ~ 1,
-    upfront_treatemnt == "Upfront systemic" &
-      ProgRecurInd == "Recurrence"                  ~ 1,
+      (ProgRecurInd == "Progression" | 
+      ProgRecurInd == "Recurrence")                 ~ 1,
     upfront_treatemnt == "Upfront systemic" &
       os_event == 1                                 ~ 1,
     upfront_treatemnt == "Upfront systemic" &
       ProgRecurInd == "No"                          ~ 0
   )) %>% 
   mutate(pfs_age = case_when(
+    upfront_treatemnt == "Upfront surgery"          ~ NA_real_,
     upfront_treatemnt == "Upfront systemic" &
-      ProgRecurInd == "Progression"                 ~ AgeAtProgRecur,
-    upfront_treatemnt == "Upfront systemic" &
-      ProgRecurInd == "Recurrence"                  ~ AgeAtProgRecur,
+      (ProgRecurInd == "Progression" | 
+         ProgRecurInd == "Recurrence")              ~ AgeAtProgRecur,
     upfront_treatemnt == "Upfront systemic" &
       os_event == 1                                 ~ os_age,
     upfront_treatemnt == "Upfront systemic" &
       ProgRecurInd == "No"                          ~ os_age
   )) %>% 
   mutate(pfs_time_from_dx_years = pfs_age - AgeAtDiagnosis) %>% 
-  mutate(pfs_time_from_treatment_years = pfs_age - age_at_first_treatment_incl_surgery) |> 
-  # DFS
-  mutate(dfs_event = case_when(
+  mutate(pfs_time_from_treatment_years = pfs_age - age_at_first_treatment_surgery_excluded) |> 
+  # PFS all - include surgery
+  mutate(pfsall_event = case_when(
+    (ProgRecurInd == "Progression" | 
+       ProgRecurInd == "Recurrence")                 ~ 1,
+    os_event == 1                                    ~ 1,
+    ProgRecurInd == "No"                             ~ 0
+  )) %>% 
+  mutate(pfsall_age = case_when(
+    (ProgRecurInd == "Progression" | 
+       ProgRecurInd == "Recurrence")                 ~ AgeAtProgRecur,
+    os_event == 1                                    ~ os_age,
+    ProgRecurInd == "No"                             ~ os_age
+  )) %>% 
+  mutate(pfsall_time_from_dx_years = pfsall_age - AgeAtDiagnosis) %>% 
+  mutate(pfsall_time_from_treatment_years = pfsall_age - age_at_first_treatment_surgery_included) |> 
+  # RFS
+  mutate(rfs_event = case_when(
+    upfront_treatemnt == "Upfront systemic"         ~ NA_real_,
     upfront_treatemnt == "Upfront surgery" &
-      ProgRecurInd == "Progression"                 ~ 1,
-    upfront_treatemnt == "Upfront surgery" &
-      ProgRecurInd == "Recurrence"                  ~ 1,
+      (ProgRecurInd == "Progression" | 
+         ProgRecurInd == "Recurrence")              ~ 1,
     upfront_treatemnt == "Upfront surgery" &
       os_event == 1                                 ~ 1,
     upfront_treatemnt == "Upfront surgery" &
       ProgRecurInd == "No"                          ~ 0
   )) %>% 
-  mutate(dfs_age = case_when(
+  mutate(rfs_age = case_when(
+    upfront_treatemnt == "Upfront systemic"         ~ NA_real_,
     upfront_treatemnt == "Upfront surgery" &
-      ProgRecurInd == "Progression"                 ~ AgeAtProgRecur,
-    upfront_treatemnt == "Upfront surgery" &
-      ProgRecurInd == "Recurrence"                  ~ AgeAtProgRecur,
+      (ProgRecurInd == "Progression" | 
+         ProgRecurInd == "Recurrence")              ~ AgeAtProgRecur,
     upfront_treatemnt == "Upfront surgery" &
       os_event == 1                                 ~ os_age,
     upfront_treatemnt == "Upfront surgery" &
       ProgRecurInd == "No"                          ~ os_age
   )) %>% 
-  mutate(dfs_time_from_dx_years = dfs_age - AgeAtDiagnosis) %>% 
-  mutate(dfs_time_from_treatment_years = dfs_age - age_at_first_treatment_incl_surgery)
+  mutate(rfs_time_from_dx_years = rfs_age - AgeAtDiagnosis) %>% 
+  mutate(rfs_time_from_treatment_years = rfs_age - age_at_first_treatment_surgery_included)
 
 write_rds(data,
           paste0(here::here(),
